@@ -46,10 +46,10 @@ else
 fi
 
 echo "→ Apuntando la CLI a $BASE_URL"
-node cli/dist/index.js config set-url "$BASE_URL" > /dev/null
+node cli/dist/index.mjs config set-url "$BASE_URL" > /dev/null
 if [ -n "$TOKEN" ]; then
-  node cli/dist/index.js config set-token "$TOKEN" > /dev/null
+  node cli/dist/index.mjs config set-token "$TOKEN" > /dev/null
 fi
 
 echo "→ Listo. Escribe \"exit\" para salir del chat."
-node cli/dist/index.js chat
+node cli/dist/index.mjs chat

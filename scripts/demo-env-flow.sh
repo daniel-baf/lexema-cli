@@ -15,15 +15,16 @@ http.createServer((req,res)=>{let b="";req.on("data",c=>b+=c);req.on("end",()=>{
 });}).listen(4599);' &
 MOCK=$!
 
-cp .env.example .env
-cat >> .env <<'EOF'
+ENV_FILE="$WORKER_DIR/.env.demo"
+cp .env.example "$ENV_FILE"
+cat >> "$ENV_FILE" <<'EOF'
 AI_PROVIDER=openrouter
 AI_BASE_URL=http://localhost:4599/v1
 AI_API_KEY=demo-key
 CLIENT_TOKEN=demo-token
 EOF
 
-npm run dev:node > /tmp/lexema-env-demo.log 2>&1 &
+ENV_FILE="$ENV_FILE" npm run dev:node > /tmp/lexema-env-demo.log 2>&1 &
 DEV=$!
 sleep 3
 
@@ -32,10 +33,10 @@ echo "=== health ==="; curl -s http://localhost:8787/health
 echo; echo "=== ask via CLI (HOME aislado) ==="
 export HOME=/tmp/lexema-env-demo-home; rm -rf "$HOME"; mkdir -p "$HOME"
 cd "$CLI_DIR"
-node dist/index.js config set-url http://localhost:8787 > /dev/null
-node dist/index.js config set-token demo-token > /dev/null
-node dist/index.js ask "prueba del .env"
+node dist/index.mjs config set-url http://localhost:8787 > /dev/null
+node dist/index.mjs config set-token demo-token > /dev/null
+node dist/index.mjs ask "prueba del .env"
 
 kill $DEV $MOCK 2>/dev/null
-rm -f "$WORKER_DIR/.env"
+rm -f "$ENV_FILE"
 echo; echo DEMO_DONE
