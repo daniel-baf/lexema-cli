@@ -2,12 +2,12 @@
 
 CLI de IA para la terminal (`lexema ask`, `lexema chat`), con un Cloudflare
 Worker como proxy que oculta tu clave de API. Costo de infraestructura: **$0**
-(Cloudflare Workers free tier + Groq free tier + GitHub Releases).
+(Cloudflare Workers free tier + Gemini API free tier + GitHub Releases).
 
 ```
 lexema-project/
 ├── cli/            # El paquete de la CLI (TypeScript -> binario)
-├── worker/         # El Worker de Cloudflare (proxy seguro hacia Groq)
+├── worker/         # El Worker de Cloudflare (proxy seguro hacia Gemini)
 ├── install.sh      # Instalador para Linux/macOS
 ├── install.ps1      # Instalador para Windows
 └── .github/workflows/release.yml   # Compila y publica binarios al crear un tag
@@ -15,11 +15,13 @@ lexema-project/
 
 ## 0. Requisitos
 
-- Cuenta de Cloudflare (ya tienes `lexemalabs.shop` configurado ahí).
-- Cuenta de [Groq](https://console.groq.com) y una API key gratuita.
+- Cuenta de Cloudflare.
+- Una API key de [Google AI Studio](https://aistudio.google.com/apikey) (Gemini), gratuita.
 - Node.js 18+ y npm instalados en tu máquina.
 - Un repositorio en GitHub (`diegoabdo/lexema-cli`) para alojar el código
   y los binarios compilados en *Releases*.
+- (Opcional) Un dominio propio si quieres publicar el instalador en tu
+  propia URL en vez de compartir el enlace a GitHub Releases.
 
 ## 1. Desplegar el Worker (backend)
 
@@ -29,12 +31,22 @@ npm install
 npx wrangler login          # abre el navegador y autoriza tu cuenta de Cloudflare
 
 # Configura los secretos (no se guardan en el código):
-npx wrangler secret put GROQ_API_KEY
-# pega tu clave de https://console.groq.com/keys
+npx wrangler secret put GEMINI_API_KEY
+# pega tu clave de https://aistudio.google.com/apikey
 
 npx wrangler secret put CLIENT_TOKEN
-# inventa un token largo y aleatorio, ej: openssl rand -hex 32
-# Este token protege tu Worker de que cualquiera lo use y gaste tu cuota de Groq.
+# inventa un token largo y aleatorio.
+# En Linux/macOS: openssl rand -hex 32
+# En Windows (PowerShell), si no tienes openssl:
+#   $b = New-Object byte[] 32
+#   [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b)
+#   ($b | ForEach-Object { $_.ToString("x2") }) -join ''
+# Este token protege tu Worker de que cualquiera lo use y gaste tu cuota de Gemini.
+#
+# Importante: si pegas el token con un pipe (`$token | wrangler secret put ...`)
+# en PowerShell, se le puede colar un salto de línea al final y el token dejará
+# de coincidir con el que guardes en la CLI. Usa el prompt interactivo de
+# `wrangler secret put` (pégalo a mano) o, en bash, `printf '%s' "$TOKEN" | wrangler secret put CLIENT_TOKEN`.
 
 npm run deploy
 ```
@@ -42,11 +54,8 @@ npm run deploy
 Al terminar, `wrangler` te dará una URL como:
 
 ```
-https://lexema-api.tu-subdominio.workers.dev
+https://lexema-api.<tu-subdominio>.workers.dev
 ```
-
-https://lexema-api.diego12.workers.dev
-
 
 Guárdala, la necesitas en el paso 2.
 
@@ -70,11 +79,9 @@ constante `DAILY_LIMIT`).
 ```bash
 cd cli
 npm install
-
-# Edita src/config.ts y cambia DEFAULT_CONFIG.workerUrl por tu URL real del Worker,
-# o simplemente configúralo en caliente:
 npm run build
-node dist/index.js config set-url https://lexema-api.diego12.workers.dev https://lexema-api.tu-subdominio.workers.dev
+
+node dist/index.js config set-url https://lexema-api.<tu-subdominio>.workers.dev
 node dist/index.js config set-token EL_MISMO_TOKEN_QUE_PUSISTE_EN_CLIENT_TOKEN
 
 node dist/index.js ask "Hola, preséntate en una línea"
@@ -122,29 +129,34 @@ firman con `codesign --sign -` (firma ad-hoc). Si los compilas tú mismo en
 Linux en vez de usar el workflow, macOS matará el ejecutable al abrirlo a
 menos que lo firmes desde un Mac o instales la utilidad `ldid`.
 
-## 5. Publicar `install.sh` en lexemalabs.shop
+## 5. Publicar el instalador en tu propio dominio (opcional)
 
-`install.sh` e `install.ps1` ya apuntan a `diegoabdo/lexema-cli`.
+Si no quieres depender de una URL de `github.com`, puedes servir
+`install.sh`/`install.ps1` desde cualquier hosting estático que ya tengas
+(por ejemplo, un sitio en Cloudflare Pages). `install.sh` e `install.ps1` ya
+apuntan a `diegoabdo/lexema-cli` como repositorio de releases.
 
-Copia `install.sh` (y opcionalmente `install.ps1`) a la carpeta del sitio
-estático que ya despliegas en Cloudflare Pages para `lexemalabs.shop` (el
-mismo repo/carpeta donde vive tu `index.html`), en la raíz, y haz push. Cloudflare
-Pages lo desplegará junto con el resto del sitio y quedará disponible en:
+Copia ambos archivos a la raíz de ese sitio y haz push; una vez desplegado
+quedarán disponibles en tu dominio, por ejemplo:
 
 ```
-https://lexemalabs.shop/install.sh
-https://lexemalabs.shop/install.ps1
+https://tu-dominio.com/install.sh
+https://tu-dominio.com/install.ps1
 ```
 
 Tus usuarios podrán instalar con:
 
 ```bash
 # Linux / macOS
-curl -fsSL https://lexemalabs.shop/install.sh | bash
+curl -fsSL https://tu-dominio.com/install.sh | bash
 
 # Windows (PowerShell)
-irm https://lexemalabs.shop/install.ps1 | iex
+irm https://tu-dominio.com/install.ps1 | iex
 ```
+
+Si prefieres no usar un dominio propio, tus usuarios también pueden descargar
+los binarios directamente desde
+`https://github.com/diegoabdo/lexema-cli/releases`.
 
 Y luego usar:
 
@@ -168,12 +180,13 @@ La configuración se guarda en `~/.lexema/config.json`.
 
 ## Siguientes pasos sugeridos (no incluidos todavía)
 
-- **Streaming de respuestas** (Groq lo soporta) para que el texto aparezca
-  palabra por palabra en vez de esperar la respuesta completa.
+- **Streaming de respuestas** (Gemini lo soporta vía `streamGenerateContent`)
+  para que el texto aparezca palabra por palabra en vez de esperar la
+  respuesta completa.
 - **BYOK (Bring Your Own Key)**: dejar que cada usuario ponga su propia
-  clave de Groq/Gemini con `lexema config set-key`, para no depender de tu
+  clave de Gemini con `lexema config set-key`, para no depender de tu
   cuota compartida a medida que crezca el uso.
 - **Homebrew tap / Scoop manifest** para instalación más nativa en
   macOS/Windows, como alternativa a los scripts `curl | bash`.
-- Revisar periódicamente `https://console.groq.com/docs/deprecations` — los
+- Revisar periódicamente `https://ai.google.dev/gemini-api/docs/models` — los
   proveedores de modelos retiran versiones con el tiempo.
