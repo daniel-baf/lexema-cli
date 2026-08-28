@@ -13,15 +13,13 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            targets: node18-linux-x64,node18-win-x64
-            rename: |
-              mv dist-bin/lexema-cli-linux-x64 dist-bin/lexema-linux-x64
-              mv dist-bin/lexema-cli-win-x64.exe dist-bin/lexema-win-x64.exe
+            commands: |
+              npx pkg . --target node18-linux-x64 --output dist-bin/lexema-linux-x64
+              npx pkg . --target node18-win-x64 --output dist-bin/lexema-win-x64.exe
           - os: macos-latest
-            targets: node18-macos-x64,node18-macos-arm64
-            rename: |
-              mv dist-bin/lexema-cli-macos-x64 dist-bin/lexema-macos-x64
-              mv dist-bin/lexema-cli-macos-arm64 dist-bin/lexema-macos-arm64
+            commands: |
+              npx pkg . --target node18-macos-x64 --output dist-bin/lexema-macos-x64
+              npx pkg . --target node18-macos-arm64 --output dist-bin/lexema-macos-arm64
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -40,7 +38,12 @@ jobs:
         run: npm run build
 
       - name: Generar binarios (@yao-pkg/pkg)
-        run: npx pkg . --targets ${{ matrix.targets }} --out-path dist-bin
+        # Se invoca pkg una vez por binario con --output explícito: pkg solo
+        # agrega sufijos de plataforma/arquitectura al nombre cuando detecta
+        # diferencias entre VARIOS targets en la misma invocación (y solo en
+        # las partes que difieren), así que construir todo en un solo comando
+        # produce nombres impredecibles (ej. "lexema-cli-linux" sin "-x64").
+        run: ${{ matrix.commands }}
 
       # En macOS, pkg puede firmar ad-hoc automaticamente porque corre en un Mac real;
       # esto evita que el sistema mate el binario al abrirlo ("Unable to sign" en Linux).
@@ -50,9 +53,6 @@ jobs:
           for f in dist-bin/*; do
             codesign --sign - "$f" || true
           done
-
-      - name: Renombrar binarios a un formato estable
-        run: ${{ matrix.rename }}
 
       - name: Subir artefactos
         uses: actions/upload-artifact@v4
