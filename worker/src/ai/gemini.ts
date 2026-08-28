@@ -1,4 +1,4 @@
-import { AIProvider, ProviderContext, ProviderError, readErrorBody } from './types';
+import { AIProvider, ProviderContext, mapHttpErrorToProviderError } from './types';
 
 interface GeminiResponse {
   candidates?: { content?: { parts?: { text?: string }[] } }[];
@@ -22,21 +22,12 @@ async function complete(prompt: string, model: string, ctx: ProviderContext): Pr
   });
 
   if (!res.ok) {
-    const errText = await readErrorBody(res);
-    console.error('Gemini error:', res.status, errText);
-    if (res.status === 429) {
-      throw new ProviderError(
-        'Se alcanzó la cuota gratuita del modelo. Intenta en unos minutos o prueba con otro modelo.',
-        429
-      );
-    }
-    if (res.status === 401 || res.status === 403) {
-      throw new ProviderError('El proveedor rechazó la clave de API (revisa GEMINI_API_KEY).', 502);
-    }
-    if (res.status === 404) {
-      throw new ProviderError(`El modelo "${model}" no existe en Gemini.`, 502);
-    }
-    throw new ProviderError('Error del proveedor de IA.', 502);
+    throw await mapHttpErrorToProviderError(res, model, {
+      logPrefix: 'Gemini error',
+      rateLimited: 'Se alcanzó la cuota gratuita del modelo. Intenta en unos minutos o prueba con otro modelo.',
+      authRejected: 'El proveedor rechazó la clave de API (revisa GEMINI_API_KEY).',
+      modelNotFound: (m) => `El modelo "${m}" no existe en Gemini.`,
+    });
   }
 
   const data = (await res.json()) as GeminiResponse;
