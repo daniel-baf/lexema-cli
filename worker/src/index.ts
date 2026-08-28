@@ -6,8 +6,8 @@ export interface Env {
 
 // Modelos permitidos. Revisa la lista vigente en https://ai.google.dev/gemini-api/docs/models
 // (los proveedores retiran modelos de vez en cuando).
-const ALLOWED_MODELS = new Set(['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.1-flash-lite']);
-const DEFAULT_MODEL = 'gemini-3.6-flash';
+const ALLOWED_MODELS = new Set(['gemini-3.5-flash-lite', 'gemini-3.5-flash', 'gemini-3.1-flash-lite']);
+const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
 const DAILY_LIMIT = 100; // peticiones por IP por día cuando RATE_LIMIT_KV está enlazado
 const MAX_PROMPT_LENGTH = 4000;
 
@@ -113,6 +113,12 @@ export default {
       if (!aiResponse.ok) {
         const errText = await aiResponse.text();
         console.error('Gemini error:', aiResponse.status, errText);
+        if (aiResponse.status === 429) {
+          return json(
+            { error: 'Se alcanzó la cuota gratuita del modelo. Intenta en unos minutos o prueba con otro modelo (-m).' },
+            429
+          );
+        }
         return json({ error: 'Error del proveedor de IA' }, 502);
       }
 
