@@ -1,5 +1,5 @@
-import React, { useCallback, useRef, useState } from 'react';
-import { Box, Static, Text, useApp, useInput } from 'ink';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Box, Static, Text, useApp, useInput, useStdin } from 'ink';
 import {
   callWorker,
   describeError,
@@ -24,6 +24,8 @@ function clearScreen(): void {
 
 export default function App() {
   const { exit } = useApp();
+  const { internal_eventEmitter } = useStdin();
+  const lastRawRef = useRef('');
   const configRef = useRef(loadConfig());
   const historyRef = useRef<ChatTurn[]>([]);
   const sentRef = useRef<string[]>([]);
@@ -118,6 +120,23 @@ export default function App() {
     [exit]
   );
 
+  // Ink clasifica el DEL crudo (\x7f, lo que manda la tecla física Backspace
+  // en la mayoría de terminales) como key.delete por compatibilidad histórica,
+  // igual que la secuencia de escape de la tecla Delete real (\x1b[3~) — y no
+  // expone la secuencia cruda en su API pública de useInput. Para no confundir
+  // "borrar hacia atrás" con "borrar hacia adelante" nos suscribimos al emisor
+  // interno de ink (antes de llamar a useInput, así corre primero) para ver el
+  // byte real y decidir la dirección nosotros mismos.
+  useEffect(() => {
+    const onRaw = (raw: string) => {
+      lastRawRef.current = raw;
+    };
+    internal_eventEmitter?.on('input', onRaw);
+    return () => {
+      internal_eventEmitter?.removeListener('input', onRaw);
+    };
+  }, [internal_eventEmitter]);
+
   useInput((data, key) => {
     if (key.return || data === '\n') {
       const text = input.trim();
@@ -176,12 +195,14 @@ export default function App() {
       return;
     }
 
-    // Además de key.backspace/key.delete (que ink deriva del nombre de tecla),
-    // se reconoce el byte crudo: algunas terminales mandan Backspace como
-    // Ctrl-H (\x08) en vez de DEL (\x7f), y ink lo reporta como key.ctrl+"h",
-    // no como key.backspace, así que se pierde si solo miramos las flags.
-    const isBackspace = key.backspace || data === '\x7f' || data === '\b';
-    const isForwardDelete = key.delete && !isBackspace;
+    // key.backspace/key.delete de ink no distinguen la tecla física Backspace
+    // (que suele mandar el byte crudo \x7f o \x08) de la tecla Delete real
+    // (secuencia de escape \x1b[3~): ambas llegan como key.delete. Usamos el
+    // byte crudo capturado arriba para decidir la dirección real del borrado.
+    const raw = lastRawRef.current;
+    const isRawEraseByte = raw === '\x7f' || raw === '\b' || raw === '\x1b\x7f' || raw === '\x1b\b';
+    const isBackspace = key.backspace || (key.delete && isRawEraseByte);
+    const isForwardDelete = key.delete && !isRawEraseByte;
 
     if (isBackspace || isForwardDelete) {
       if (cursor === 0 && isBackspace) return;
