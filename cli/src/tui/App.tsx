@@ -176,10 +176,17 @@ export default function App() {
       return;
     }
 
-    if (key.backspace || key.delete) {
-      if (cursor === 0 && key.backspace) return;
-      const from = key.backspace ? cursor - 1 : cursor;
-      const to = key.backspace ? cursor : cursor + 1;
+    // Además de key.backspace/key.delete (que ink deriva del nombre de tecla),
+    // se reconoce el byte crudo: algunas terminales mandan Backspace como
+    // Ctrl-H (\x08) en vez de DEL (\x7f), y ink lo reporta como key.ctrl+"h",
+    // no como key.backspace, así que se pierde si solo miramos las flags.
+    const isBackspace = key.backspace || data === '\x7f' || data === '\b';
+    const isForwardDelete = key.delete && !isBackspace;
+
+    if (isBackspace || isForwardDelete) {
+      if (cursor === 0 && isBackspace) return;
+      const from = isBackspace ? cursor - 1 : cursor;
+      const to = isBackspace ? cursor : cursor + 1;
       if (from < 0 || from >= input.length) return;
       const next = input.slice(0, from) + input.slice(to);
       setInput(next);
