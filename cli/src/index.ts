@@ -96,6 +96,36 @@ program
     }
   });
 
+program
+  .command('models')
+  .description('Lista los modelos disponibles en el servidor')
+  .action(async () => {
+    const config = loadConfig();
+    const headers: Record<string, string> = {};
+    if (config.token) headers.Authorization = `Bearer ${config.token}`;
+    try {
+      const res = await axios.get(`${config.workerUrl.replace(/\/+$/, '')}/models`, {
+        headers,
+        timeout: 10000,
+      });
+      const { provider, defaultModel, models } = res.data as {
+        provider: string;
+        defaultModel: string;
+        models: string[] | null;
+      };
+      console.log(pc.bold(pc.cyan('Proveedor:')) + ' ' + provider);
+      console.log(pc.bold(pc.cyan('Modelo por defecto:')) + ' ' + defaultModel);
+      console.log(
+        pc.bold(pc.cyan('Modelos:')) +
+          ' ' +
+          (models && models.length ? models.join(', ') : '(sin restricción, usa -m <modelo>)')
+      );
+    } catch (error) {
+      console.log(pc.red('✖ ') + describeError(error));
+      process.exitCode = 1;
+    }
+  });
+
 const configCmd = program.command('config').description('Configura la CLI');
 
 configCmd
