@@ -1,6 +1,6 @@
 {
   "name": "lexema-cli",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "CLI oficial de Lexema Labs para IA en la terminal",
   "license": "MIT",
   "bin": {

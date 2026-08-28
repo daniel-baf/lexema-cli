@@ -5,7 +5,7 @@ import inquirer from 'inquirer';
 import pc from 'picocolors';
 import { loadConfig, saveConfig } from './config';
 
-const VERSION = '1.0.1'; // mantenla en sincronía con package.json
+const VERSION = '1.0.2'; // mantenla en sincronía con package.json
 
 const program = new Command();
 
@@ -70,17 +70,17 @@ program
   .command('chat')
   .description('Inicia una sesión interactiva de conversación')
   .action(async () => {
-    console.log(pc.bold(pc.cyan('\n─── Sesión Interactiva de Lexema (Escribe "salir" para terminar) ───\n')));
+    console.log(pc.bold(pc.cyan('\n─── Sesión Interactiva de Lexema (escribe "exit" para salir) ───\n')));
 
     // eslint-disable-next-line no-constant-condition
     while (true) {
       const { input } = await inquirer.prompt([
-        { type: 'input', name: 'input', message: pc.green('tú >') },
+        { type: 'input', name: 'input', message: pc.green('you >') },
       ]);
 
       const trimmed = String(input).trim();
       const lower = trimmed.toLowerCase();
-      if (lower === 'salir' || lower === 'exit') {
+      if (lower === 'exit') {
         console.log(pc.yellow('¡Hasta luego!'));
         break;
       }
