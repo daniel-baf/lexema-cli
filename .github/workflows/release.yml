@@ -40,7 +40,7 @@ jobs:
       - name: Inyectar token compartido por defecto
         env:
           LEXEMA_CLIENT_TOKEN: ${{ secrets.LEXEMA_CLIENT_TOKEN }}
-        run: node scripts/inject-token.js
+        run: node ../scripts/inject-token.js
 
       - name: Generar binarios (@yao-pkg/pkg)
         # Se invoca pkg una vez por binario con --output explícito: pkg solo

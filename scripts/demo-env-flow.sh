@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -u
 # Demo del flujo canónico: TODO sale de worker/.env, nada de variables inline.
-WORKER_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+WORKER_DIR="$(cd "$(dirname "$0")/../worker" && pwd)"
 CLI_DIR="$(cd "$WORKER_DIR/../cli" && pwd)"
 cd "$WORKER_DIR"
 

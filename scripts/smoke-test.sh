@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -u
-WORKER_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+WORKER_DIR="$(cd "$(dirname "$0")/../worker" && pwd)"
 cd "$WORKER_DIR"
 
 node -e '

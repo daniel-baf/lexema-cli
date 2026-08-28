@@ -11,7 +11,7 @@ if (!token) {
   process.exit(0);
 }
 
-const configPath = path.join(__dirname, '..', 'dist', 'config.js');
+const configPath = path.join(__dirname, '..', 'cli', 'dist', 'config.js');
 const marker = "DEFAULT_CLIENT_TOKEN = ''";
 
 let content = fs.readFileSync(configPath, 'utf8');
