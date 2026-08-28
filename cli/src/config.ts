@@ -11,9 +11,16 @@ export interface LexemaConfig {
   model?: string;
 }
 
-// Cambia esta URL por la de tu Worker una vez lo despliegues con `wrangler deploy`.
+// Token compartido por defecto para los binarios públicos (release de GitHub).
+// En un checkout local queda vacío a propósito: nunca se hardcodea el token
+// real en el código fuente. El workflow de release lo inyecta en dist/config.js
+// después de compilar (ver cli/scripts/inject-token.js), leyéndolo del secreto
+// LEXEMA_CLIENT_TOKEN de GitHub Actions.
+const DEFAULT_CLIENT_TOKEN = '';
+
 const DEFAULT_CONFIG: LexemaConfig = {
-  workerUrl: 'https://lexema-api.TU-SUBDOMINIO.workers.dev',
+  workerUrl: 'https://lexema-api.diego12.workers.dev',
+  token: DEFAULT_CLIENT_TOKEN || undefined,
 };
 
 export function loadConfig(): LexemaConfig {

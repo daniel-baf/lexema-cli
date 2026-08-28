@@ -5,7 +5,7 @@ import inquirer from 'inquirer';
 import pc from 'picocolors';
 import { loadConfig, saveConfig } from './config';
 
-const VERSION = '1.0.0'; // mantenla en sincronía con package.json
+const VERSION = '1.0.1'; // mantenla en sincronía con package.json
 
 const program = new Command();
 
