@@ -4,7 +4,7 @@
 
 SCRIPTS := scripts
 
-.PHONY: help install env server up use-local build cli ask chat models config typecheck test demo clean deploy
+.PHONY: help install env server up use-local build cli ask chat models config typecheck lint test demo clean deploy
 
 help: ## Lista los comandos disponibles
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -29,9 +29,9 @@ up: ## Levanta el servidor local y abre el chat (al salir se detiene todo)
 	@bash $(SCRIPTS)/up.sh
 
 use-local: ## Apunta la CLI al servidor local (URL + token del .env)
-	@node cli/dist/index.js config set-url http://localhost:8787
+	@node cli/dist/index.mjs config set-url http://localhost:8787
 	@TOKEN=$$(grep -E '^CLIENT_TOKEN=' worker/.env 2>/dev/null | cut -d= -f2); \
-	if [ -n "$$TOKEN" ]; then node cli/dist/index.js config set-token "$$TOKEN"; \
+	if [ -n "$$TOKEN" ]; then node cli/dist/index.mjs config set-token "$$TOKEN"; \
 	else echo "Sin CLIENT_TOKEN en .env (endpoint abierto)"; fi
 
 build: ## Compila la CLI (cli/dist)
@@ -39,28 +39,35 @@ build: ## Compila la CLI (cli/dist)
 
 cli: ## Corre la CLI local: make cli CMD="models"
 	@test -d cli/dist || $(MAKE) build
-	@node cli/dist/index.js $(CMD)
+	@node cli/dist/index.mjs $(CMD)
 
 ask: ## Pregunta puntual: make ask P="hola"
 	@test -d cli/dist || $(MAKE) build
 	@if [ -z "$(P)" ]; then echo 'uso: make ask P="tu pregunta"'; exit 1; fi
-	@node cli/dist/index.js ask "$(P)"
+	@node cli/dist/index.mjs ask "$(P)"
 
 chat: ## Sesión interactiva contra el servidor configurado
 	@test -d cli/dist || $(MAKE) build
-	@node cli/dist/index.js chat
+	@node cli/dist/index.mjs chat
 
 models: ## Lista los modelos del servidor configurado
 	@test -d cli/dist || $(MAKE) build
-	@node cli/dist/index.js models
+	@node cli/dist/index.mjs models
 
 config: ## Muestra la configuración actual de la CLI
-	@node cli/dist/index.js config show
+	@node cli/dist/index.mjs config show
 
-typecheck: ## Verifica tipos del worker (Cloudflare + servidor local)
+typecheck: ## Verifica tipos de cli/ y worker/ (Cloudflare + servidor local)
+	@cd cli && npm run typecheck
 	@cd worker && npm run typecheck
 
-test: typecheck build ## Suite completa: tipos + smoke test + demo del flujo .env
+lint: ## Corre ESLint en cli/ y worker/
+	@cd cli && npm run lint
+	@cd worker && npm run lint
+
+test: typecheck lint build ## Suite completa: tipos + lint + unit tests + smoke test + demo del flujo .env
+	@cd cli && npm run test
+	@cd worker && npm run test
 	@bash $(SCRIPTS)/smoke-test.sh
 	@bash $(SCRIPTS)/demo-env-flow.sh
 
