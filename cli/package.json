@@ -3,38 +3,36 @@
   "version": "1.0.2",
   "description": "CLI oficial de Lexema Labs para IA en la terminal",
   "license": "MIT",
+  "type": "module",
   "bin": {
-    "lexema": "dist/index.js"
+    "lexema": "dist/index.mjs"
   },
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "tsc",
-    "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts",
-    "compile": "npm run build && pkg . --out-path dist-bin"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "build": "node scripts/build.mjs",
+    "start": "node dist/index.mjs",
+    "dev": "bun src/index.tsx",
+    "compile": "npm run build && bun build --compile dist/index.mjs --outfile dist-bin/lexema-linux-x64"
   },
   "dependencies": {
     "axios": "^1.7.7",
     "commander": "^12.1.0",
-    "inquirer": "^8.2.6",
-    "picocolors": "^1.1.0"
+    "ink": "^5.2.1",
+    "picocolors": "^1.1.0",
+    "react": "^18.3.1"
   },
   "devDependencies": {
-    "@types/inquirer": "^9.0.7",
     "@types/node": "^20.14.0",
-    "@yao-pkg/pkg": "^5.14.0",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.5.4"
-  },
-  "pkg": {
-    "outputPath": "dist-bin",
-    "targets": [
-      "node18-linux-x64",
-      "node18-macos-x64",
-      "node18-macos-arm64",
-      "node18-win-x64"
-    ]
+    "@types/react": "^18.3.12",
+    "esbuild": "^0.24.0",
+    "eslint": "^10.9.1",
+    "typescript": "^5.5.4",
+    "typescript-eslint": "^8.68.0",
+    "vitest": "^4.1.11"
   }
 }

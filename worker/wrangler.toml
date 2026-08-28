@@ -2,6 +2,15 @@ name = "lexema-api"
 main = "src/index.ts"
 compatibility_date = "2024-09-23"
 
+# Config no sensible del proveedor (ver worker/.env.example para el resto de
+# variables). Producción sigue en Gemini con el mismo comportamiento que antes
+# de la migración a proveedores agnósticos; cambiar de proveedor implica
+# también rotar los secrets de abajo, así que se trata como un cambio aparte.
+[vars]
+AI_PROVIDER = "gemini"
+AI_DEFAULT_MODEL = "gemini-3.5-flash-lite"
+AI_ALLOWED_MODELS = "gemini-3.5-flash-lite,gemini-3.5-flash,gemini-3.1-flash-lite"
+
 # Secretos (no van aquí, se configuran con `wrangler secret put`):
 #   GEMINI_API_KEY -> tu clave de https://aistudio.google.com/apikey
 #   CLIENT_TOKEN   -> token compartido que tu CLI enviará como Authorization: Bearer <token>
