@@ -1,0 +1,78 @@
+name: Release CLI binaries
+
+# Se dispara al publicar un tag como v1.0.0
+#   git tag v1.0.0 && git push origin v1.0.0
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            targets: node18-linux-x64,node18-win-x64
+            rename: |
+              mv dist-bin/lexema-cli-linux-x64 dist-bin/lexema-linux-x64
+              mv dist-bin/lexema-cli-win-x64.exe dist-bin/lexema-win-x64.exe
+          - os: macos-latest
+            targets: node18-macos-x64,node18-macos-arm64
+            rename: |
+              mv dist-bin/lexema-cli-macos-x64 dist-bin/lexema-macos-x64
+              mv dist-bin/lexema-cli-macos-arm64 dist-bin/lexema-macos-arm64
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Instalar dependencias
+        run: npm install
+
+      - name: Compilar TypeScript
+        run: npm run build
+
+      - name: Generar binarios (@yao-pkg/pkg)
+        run: npx pkg . --targets ${{ matrix.targets }} --out-path dist-bin
+
+      # En macOS, pkg puede firmar ad-hoc automaticamente porque corre en un Mac real;
+      # esto evita que el sistema mate el binario al abrirlo ("Unable to sign" en Linux).
+      - name: Firmar binarios de macOS (ad-hoc)
+        if: matrix.os == 'macos-latest'
+        run: |
+          for f in dist-bin/*; do
+            codesign --sign - "$f" || true
+          done
+
+      - name: Renombrar binarios a un formato estable
+        run: ${{ matrix.rename }}
+
+      - name: Subir artefactos
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.os }}
+          path: cli/dist-bin/*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Publicar Release en GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true

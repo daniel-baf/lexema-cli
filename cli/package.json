@@ -1,0 +1,40 @@
+{
+  "name": "lexema-cli",
+  "version": "1.0.0",
+  "description": "CLI oficial de Lexema Labs para IA en la terminal",
+  "license": "MIT",
+  "bin": {
+    "lexema": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "compile": "npm run build && pkg . --out-path dist-bin"
+  },
+  "dependencies": {
+    "axios": "^1.7.7",
+    "commander": "^12.1.0",
+    "inquirer": "^8.2.6",
+    "picocolors": "^1.1.0"
+  },
+  "devDependencies": {
+    "@types/inquirer": "^9.0.7",
+    "@types/node": "^20.14.0",
+    "@yao-pkg/pkg": "^5.14.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.4"
+  },
+  "pkg": {
+    "outputPath": "dist-bin",
+    "targets": [
+      "node18-linux-x64",
+      "node18-macos-x64",
+      "node18-macos-arm64",
+      "node18-win-x64"
+    ]
+  }
+}
