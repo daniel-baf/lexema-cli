@@ -13,11 +13,12 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 
-# Config leída del .env: puerto y token compartido
-PORT=$(grep -E '^PORT=' "$ENV_FILE" | cut -d= -f2 || true)
+# Config leída del .env: puerto y token compartido.
+# cut -f2- (no -f2): un token/valor con "=" no debe truncarse en el primero.
+PORT=$(grep -E '^PORT=' "$ENV_FILE" | cut -d= -f2- || true)
 PORT=${PORT:-8787}
 BASE_URL="http://localhost:$PORT"
-TOKEN=$(grep -E '^CLIENT_TOKEN=' "$ENV_FILE" | cut -d= -f2 || true)
+TOKEN=$(grep -E '^CLIENT_TOKEN=' "$ENV_FILE" | cut -d= -f2- || true)
 
 if curl -sf "$BASE_URL/health" > /dev/null 2>&1; then
   echo "→ Ya hay un servidor corriendo en $BASE_URL (se reutiliza)"

@@ -80,8 +80,8 @@ function main(): void {
   if (process.env.ENV_FILE) {
     loadEnvFile(process.env.ENV_FILE);
   } else {
-    loadEnvFile(path.resolve(process.cwd(), '.dev.vars'));
     loadEnvFile(path.resolve(process.cwd(), '.env')); // .env tiene prioridad
+    loadEnvFile(path.resolve(process.cwd(), '.dev.vars'));
   }
 
   const cfg = resolveConfig(process.env);

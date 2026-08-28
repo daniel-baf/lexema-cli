@@ -52,7 +52,18 @@ export async function handleRequest(
 
   const path = new URL(request.url).pathname.replace(/\/+$/, '') || '/';
 
-  if (request.method === 'GET' && (path === '/health' || path === '')) {
+  // Autenticación simple por token compartido (opcional pero recomendado).
+  // Va antes de los GET: si no, /health y /models exponen el proveedor, el
+  // modelo por defecto y la lista blanca a cualquiera con la URL.
+  if (cfg.clientToken) {
+    const auth = request.headers.get('Authorization') || '';
+    const token = auth.replace(/^Bearer\s+/i, '');
+    if (token !== cfg.clientToken) {
+      return json({ error: 'No autorizado' }, 401);
+    }
+  }
+
+  if (request.method === 'GET' && path === '/health') {
     return json({ ok: true, provider: cfg.providerId });
   }
 
@@ -67,15 +78,6 @@ export async function handleRequest(
 
   if (request.method !== 'POST') {
     return json({ error: 'Método no permitido' }, 405);
-  }
-
-  // Autenticación simple por token compartido (opcional pero recomendado).
-  if (cfg.clientToken) {
-    const auth = request.headers.get('Authorization') || '';
-    const token = auth.replace(/^Bearer\s+/i, '');
-    if (token !== cfg.clientToken) {
-      return json({ error: 'No autorizado' }, 401);
-    }
   }
 
   // Rate limiting opcional por IP (requiere un binding KV en Cloudflare,

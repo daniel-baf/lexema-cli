@@ -18,9 +18,20 @@ const ALIASES: Record<string, { id: string; baseUrl?: string }> = {
   groq: { id: 'openai', baseUrl: 'https://api.groq.com/openai/v1' },
 };
 
-export function getProvider(name?: string): { provider: AIProvider; aliasBaseUrl?: string } {
+// Sin AI_PROVIDER explícito: gemini si hay GEMINI_API_KEY/GOOGLE_API_KEY,
+// si no openai (compatible con OpenRouter/Groq/OpenAI vía AI_BASE_URL).
+function autodetectProvider(env?: Record<string, unknown>): AIProvider {
+  const has = (key: string) => typeof env?.[key] === 'string' && (env[key] as string).trim() !== '';
+  if (has('GEMINI_API_KEY') || has('GOOGLE_API_KEY')) return geminiProvider;
+  return openaiProvider;
+}
+
+export function getProvider(
+  name?: string,
+  env?: Record<string, unknown>
+): { provider: AIProvider; aliasBaseUrl?: string } {
   const raw = (name || '').trim().toLowerCase();
-  if (!raw) return { provider: openaiProvider };
+  if (!raw) return { provider: autodetectProvider(env) };
   const alias = ALIASES[raw];
   if (alias) {
     const provider = PROVIDERS[alias.id];

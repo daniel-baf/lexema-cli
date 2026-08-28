@@ -29,7 +29,7 @@ function int(env: Record<string, unknown>, name: string, fallback: number): numb
 // Toda la configuración sale de variables de entorno, así el mismo worker
 // funciona igual en Cloudflare (secrets/vars) y en el servidor local (.env).
 export function resolveConfig(env: Record<string, unknown>): ResolvedConfig {
-  const { provider, aliasBaseUrl } = getProvider(str(env, 'AI_PROVIDER'));
+  const { provider, aliasBaseUrl } = getProvider(str(env, 'AI_PROVIDER'), env);
 
   const apiKey =
     str(env, ...provider.keyEnvVars) ||

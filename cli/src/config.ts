@@ -14,7 +14,7 @@ export interface LexemaConfig {
 // Token compartido por defecto para los binarios públicos (release de GitHub).
 // En un checkout local queda vacío a propósito: nunca se hardcodea el token
 // real en el código fuente. El workflow de release lo inyecta en dist/config.js
-// después de compilar (ver cli/scripts/inject-token.js), leyéndolo del secreto
+// después de compilar (ver scripts/inject-token.js), leyéndolo del secreto
 // LEXEMA_CLIENT_TOKEN de GitHub Actions.
 const DEFAULT_CLIENT_TOKEN = '';
 
