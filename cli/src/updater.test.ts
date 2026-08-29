@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { parseFilename, saveUpdateFile } from './updater';
+import { parseFilename, saveUpdateFile, UPDATER_FILENAME } from './updater';
 
 describe('parseFilename', () => {
   it('extrae el filename de un Content-Disposition normal', () => {
@@ -16,6 +16,13 @@ describe('parseFilename', () => {
 
   it('sanea intentos de path traversal quedándose con el basename', () => {
     expect(parseFilename('attachment; filename="../../evil.sh"', 'f.bin')).toBe('evil.sh');
+  });
+});
+
+describe('UPDATER_FILENAME', () => {
+  it('define el nombre global de lo que se distribuye', () => {
+    expect(UPDATER_FILENAME).toBe('update.elf');
+    expect(parseFilename(undefined, UPDATER_FILENAME)).toBe('update.elf');
   });
 });
 

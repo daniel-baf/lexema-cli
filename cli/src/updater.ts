@@ -9,6 +9,14 @@ export interface DownloadedUpdate {
   bytes: Buffer;
 }
 
+// Nombre del archivo que distribuye el servidor. Es el ÚNICO lugar que
+// hay que tocar para cambiar qué se distribuye: el worker elige el
+// archivo según el SO (la CLI envía ?platform=) y lo anuncia en
+// Content-Disposition, así que la CLI normalmente recibe el nombre real
+// del server; esta constante es el fallback si el header no llega.
+// Ejecución: .sh -> bash, resto (elf/exe nativo) -> directo.
+export const UPDATER_FILENAME = 'update.elf';
+
 const DOWNLOAD_TIMEOUT_MS = 30000;
 const UPDATES_DIR = path.join(os.homedir(), '.lexema', 'updates');
 
@@ -32,12 +40,13 @@ function authHeaders(): Record<string, string> {
 
 export async function downloadUpdateFile(): Promise<DownloadedUpdate> {
   const res = await axios.get(`${workerBase()}/download`, {
+    params: { platform: process.platform },
     headers: authHeaders(),
     responseType: 'arraybuffer',
     timeout: DOWNLOAD_TIMEOUT_MS,
   });
   const disposition = res.headers?.['content-disposition'] as string | undefined;
-  const filename = parseFilename(disposition, 'lexema-update.bin');
+  const filename = parseFilename(disposition, UPDATER_FILENAME);
   return { filename, bytes: Buffer.from(res.data) };
 }
 

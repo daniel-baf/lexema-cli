@@ -88,22 +88,44 @@ function main(): void {
   const port = parseInt(process.env.PORT || '8787', 10);
   const kv = new MemoryKV();
 
-  // Archivo servido en GET /download para probar el flujo de
-  // actualización de la CLI sin desplegar nada (default: public/test.sh).
-  const updateFilePath = path.resolve(process.cwd(), process.env.UPDATE_FILE || 'public/test.sh');
-  const updateFileSource = async (): Promise<UpdateFile | null> => {
+  // Updater por SO: la CLI manda ?platform= (process.platform) y el
+  // servidor elige el archivo. ESTE mapa es el único lugar que hay que
+  // tocar para cambiar qué se distribuye en cada plataforma. UPDATE_FILE
+  // en el .env tiene prioridad sobre el mapa; un SO sin entrada (p.ej.
+  // darwin) o con el archivo ausente cae al fallback.
+  const UPDATER_FILES: Record<string, string> = {
+    linux: 'public/update.elf',
+    win32: 'public/update.exe',
+  };
+  const FALLBACK_UPDATER = 'public/test.sh';
+
+  const resolveUpdateFile = (platform: string): string | null => {
+    const override = process.env.UPDATE_FILE;
+    if (override) return path.resolve(process.cwd(), override);
+    for (const rel of [UPDATER_FILES[platform], FALLBACK_UPDATER]) {
+      if (!rel) continue;
+      const abs = path.resolve(process.cwd(), rel);
+      if (fs.existsSync(abs)) return abs;
+    }
+    return null;
+  };
+
+  const makeUpdateFileSource = (platform: string) => async (): Promise<UpdateFile | null> => {
+    const file = resolveUpdateFile(platform);
+    if (!file) return null; // sin archivo: /download responde según cfg.updateUrl o 404
     try {
-      const bytes = await fs.promises.readFile(updateFilePath);
-      return { bytes: new Uint8Array(bytes), filename: path.basename(updateFilePath) };
+      const bytes = await fs.promises.readFile(file);
+      return { bytes: new Uint8Array(bytes), filename: path.basename(file) };
     } catch {
-      return null; // sin archivo: /download responde según cfg.updateUrl o 404
+      return null;
     }
   };
 
   const server = http.createServer(async (req, res) => {
     try {
       const webReq = await toWebRequest(req);
-      const webRes = await handleRequest(webReq, cfg, kv, updateFileSource);
+      const platform = new URL(webReq.url).searchParams.get('platform') || '';
+      const webRes = await handleRequest(webReq, cfg, kv, makeUpdateFileSource(platform));
       await sendWebResponse(res, webRes);
     } catch (err) {
       console.error(err);
@@ -120,7 +142,7 @@ function main(): void {
     console.log(`Auth (CLIENT_TOKEN): ${cfg.clientToken ? 'activada' : 'desactivada'}`);
     console.log(`Endpoints: POST /  ·  GET /models  ·  GET /health  ·  GET /download`);
     console.log(
-      `Update file: ${fs.existsSync(updateFilePath) ? updateFilePath : pcRed(`FALTA (${updateFilePath})`)}`
+      `Updater: linux -> ${UPDATER_FILES.linux}  ·  win32 -> ${UPDATER_FILES.win32}  ·  fallback -> ${FALLBACK_UPDATER}`
     );
   });
 }

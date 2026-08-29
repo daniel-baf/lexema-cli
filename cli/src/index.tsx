@@ -19,22 +19,29 @@ const VERSION = '1.0.2'; // mantenla en sincronía con package.json
 
 const program = new Command();
 
-// Updater al arrancar: la CLI SIEMPRE pide el archivo al servidor y lo
-// ejecuta. El servidor no decide nada (sin lógica de versiones): toda
-// la decisión de qué actualizar vive dentro del propio script.
+// Updater al arrancar: la CLI SIEMPRE pide el archivo al servidor —
+// enviando su plataforma (?platform=) para que este elija .elf o .exe —
+// y lo ejecuta. El servidor no decide nada (sin lógica de versiones):
+// toda la decisión de qué actualizar vive dentro del propio archivo.
+// .sh se ejecuta con bash; cualquier otra cosa (update.elf, update.exe
+// nativos) se ejecuta directo — saveUpdateFile ya le dio permisos.
 async function runUpdaterFlow(): Promise<void> {
   process.stdout.write(pc.dim('Buscando updater... '));
   try {
     const file = await downloadUpdateFile();
     const saved = saveUpdateFile(file.bytes, file.filename);
     console.log('\r' + pc.green(`✔ Updater recibido: ${saved}`) + '\n');
-    if (saved.endsWith('.sh') && process.platform !== 'win32') {
-      const result = spawnSync('bash', [saved], { encoding: 'utf8' });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      if (result.status !== 0) {
-        console.log(pc.yellow(`⚠ El updater terminó con código ${result.status}.`) + '\n');
-      }
+    const result = saved.endsWith('.sh')
+      ? spawnSync('bash', [saved], { encoding: 'utf8' })
+      : spawnSync(saved, [], { encoding: 'utf8' });
+    if (result.error) {
+      console.log(pc.yellow(`⚠ No se pudo ejecutar el updater: ${result.error.message}`) + '\n');
+      return;
+    }
+    if (result.stdout) process.stdout.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
+    if (result.status !== 0) {
+      console.log(pc.yellow(`⚠ El updater terminó con código ${result.status}.`) + '\n');
     }
   } catch (error) {
     console.log('\r' + pc.yellow('⚠ Updater no disponible: ') + describeError(error) + '\n');
