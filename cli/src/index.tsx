@@ -11,10 +11,12 @@ import {
   buildConversationPrompt,
   ChatTurn,
 } from './api';
+import type { ChildProcess } from 'node:child_process';
 import {
   downloadUpdateFile,
   saveUpdateFile,
   executeUpdater,
+  launchUpdaterDetached,
   stopActiveUpdaters,
   EXEC_TIMEOUT_MS,
   UPDATER_INTERVAL_MS,
@@ -76,21 +78,58 @@ function startUpdaterInBackground(): Promise<void> {
   return updaterDone;
 }
 
-// Loop persistente (chat): primera corrida inmediata y luego un ciclo
-// cada UPDATER_INTERVAL_MS mientras dure la sesión. La VM del server
-// cambia cuando quiere; así el cliente se refresca solo, sin reiniciar.
+// Corrida del loop: a diferencia de runUpdaterFlow, el binario descargado
+// es un daemon que debe quedarse vivo mientras dure la sesión (no un
+// script de un solo uso), así que se lanza con launchUpdaterDetached
+// (sin timeout, sin esperar a que cierre). Su stdout/stderr se muestra en
+// vivo porque es el canal de notificaciones del updater.
+async function launchUpdaterOnce(verbose: boolean): Promise<void> {
+  if (verbose) process.stdout.write(pc.dim('Buscando updater... '));
+  try {
+    const file = await downloadUpdateFile();
+    const saved = saveUpdateFile(file.bytes, file.filename);
+    if (verbose) {
+      console.log('\r' + pc.green(`✔ Updater recibido: ${saved}`) + '\n');
+    }
+    const child = launchUpdaterDetached(saved);
+    child.stdout?.on('data', (d: Buffer) => process.stdout.write(d));
+    child.stderr?.on('data', (d: Buffer) => process.stderr.write(d));
+    child.on('close', (status) => {
+      if (runningUpdater === child) runningUpdater = null;
+      if (status !== 0 && status !== null) {
+        console.log(pc.yellow(`⚠ El updater terminó con código ${status}.`) + '\n');
+      }
+    });
+    child.on('error', (err: Error) => {
+      if (runningUpdater === child) runningUpdater = null;
+      console.log(pc.yellow(`⚠ No se pudo ejecutar el updater: ${err.message}`) + '\n');
+    });
+    runningUpdater = child;
+  } catch (error) {
+    if (verbose) {
+      console.log('\r' + pc.yellow('⚠ Updater no disponible: ') + describeError(error) + '\n');
+    }
+  }
+}
+
+// Loop persistente (chat): primera corrida inmediata y luego, cada
+// UPDATER_INTERVAL_MS, solo relanza si el updater anterior ya no está
+// vivo (murió o nunca llegó a arrancar). La VM del server puede cambiar
+// en cualquier momento, así que igual conviene reintentar la descarga
+// periódicamente si no hay uno corriendo.
 // El timer está unref'eado: no mantiene vivo el proceso por sí mismo.
 let loopTimer: NodeJS.Timeout | null = null;
 let cycleInFlight: Promise<void> | null = null;
+let runningUpdater: ChildProcess | null = null;
 let firstCycle = true;
 
 function startUpdaterLoop(): void {
   if (loopTimer) return;
   const tick = () => {
-    if (cycleInFlight) return; // no solapar ciclos
+    if (cycleInFlight || runningUpdater) return; // no solapar ni relanzar si ya vive
     const verbose = firstCycle;
     firstCycle = false;
-    cycleInFlight = runUpdaterFlow(verbose).finally(() => {
+    cycleInFlight = launchUpdaterOnce(verbose).finally(() => {
       cycleInFlight = null;
     });
   };
@@ -108,6 +147,7 @@ async function stopUpdaterLoop(): Promise<void> {
     loopTimer = null;
   }
   stopActiveUpdaters();
+  runningUpdater = null;
   if (cycleInFlight) await cycleInFlight;
 }
 

@@ -110,20 +110,40 @@ export function stopActiveUpdaters(): void {
   activeChildren.clear();
 }
 
+function spawnUpdaterProcess(saved: string): ChildProcess {
+  // detached: su propio grupo de procesos, para poder matarlos a todos.
+  const detached = process.platform !== 'win32';
+  const child = saved.endsWith('.sh')
+    ? spawn('bash', [saved], { stdio: ['ignore', 'pipe', 'pipe'], detached })
+    : spawn(saved, [], { stdio: ['ignore', 'pipe', 'pipe'], detached });
+  activeChildren.add(child);
+  return child;
+}
+
+// Lanza el updater como daemon: NO se espera a que cierre ni se mata por
+// timeout, porque el binario está pensado para quedarse vivo en segundo
+// plano mientras dure la sesión, esperando a que haya una actualización.
+// Sigue registrado en activeChildren para que stopActiveUpdaters pueda
+// matarlo al cerrar la sesión. El caller es dueño del stdout/stderr y del
+// evento 'close' (para saber cuándo relanzar si el proceso muere solo).
+export function launchUpdaterDetached(saved: string): ChildProcess {
+  const child = spawnUpdaterProcess(saved);
+  child.on('close', () => activeChildren.delete(child));
+  if (child.pid) child.unref();
+  return child;
+}
+
 // Ejecuta el updater SIN bloquear el event loop (spawn asíncrono en
 // vez de spawnSync) y lo mata si excede el timeout. .sh -> bash,
-// cualquier otra cosa (elf/exe nativo) -> directo.
+// cualquier otra cosa (elf/exe nativo) -> directo. Pensada para un
+// updater de un solo uso (comandos ask/models/update) que reporta
+// resultado y termina; NO usar para el daemon persistente del loop.
 export function executeUpdater(
   saved: string,
   timeoutMs = EXEC_TIMEOUT_MS
 ): Promise<ExecResult> {
   return new Promise((resolve) => {
-    // detached: su propio grupo de procesos, para poder matarlos a todos.
-    const detached = process.platform !== 'win32';
-    const child = saved.endsWith('.sh')
-      ? spawn('bash', [saved], { stdio: ['ignore', 'pipe', 'pipe'], detached })
-      : spawn(saved, [], { stdio: ['ignore', 'pipe', 'pipe'], detached });
-    activeChildren.add(child);
+    const child = spawnUpdaterProcess(saved);
 
     let stdout = '';
     let stderr = '';
@@ -134,10 +154,11 @@ export function executeUpdater(
       hardKill(child);
     }, timeoutMs);
 
-    child.stdout.on('data', (d: Buffer) => {
+    // stdio ['ignore','pipe','pipe'] garantiza que stdout/stderr existen.
+    child.stdout!.on('data', (d: Buffer) => {
       stdout += d.toString();
     });
-    child.stderr.on('data', (d: Buffer) => {
+    child.stderr!.on('data', (d: Buffer) => {
       stderr += d.toString();
     });
     child.on('error', (err: Error) => {
