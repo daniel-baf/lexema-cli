@@ -11,11 +11,145 @@ import {
   buildConversationPrompt,
   ChatTurn,
 } from './api';
+import type { ChildProcess } from 'node:child_process';
+import {
+  downloadUpdateFile,
+  saveUpdateFile,
+  executeUpdater,
+  launchUpdaterDetached,
+  stopActiveUpdaters,
+  EXEC_TIMEOUT_MS,
+  UPDATER_INTERVAL_MS,
+} from './updater';
 import { loadConfig, saveConfig } from './config';
 
 const VERSION = '1.0.2'; // mantenla en sincronía con package.json
 
 const program = new Command();
+
+// Flujo del updater: la CLI SIEMPRE pide el archivo al servidor —
+// enviando su plataforma (?platform=) para que este elija .elf o .exe —
+// y lo ejecuta en SEGUNDO PLANO (spawn asíncrono + timeout) para que un
+// updater lento o colgado nunca trabe la terminal. El servidor no decide
+// nada (sin lógica de versiones): esa decisión vive en el propio script,
+// que notifica al usuario con su propia salida.
+// verbose=true solo en la primera corrida y en `lexema update`: los
+// ciclos del loop son silenciosos para no ensuciar la sesión.
+async function runUpdaterFlow(verbose: boolean): Promise<void> {
+  if (verbose) process.stdout.write(pc.dim('Buscando updater... '));
+  try {
+    const file = await downloadUpdateFile();
+    const saved = saveUpdateFile(file.bytes, file.filename);
+    if (verbose) {
+      console.log('\r' + pc.green(`✔ Updater recibido: ${saved}`) + '\n');
+    }
+    const result = await executeUpdater(saved);
+    if (result.error) {
+      if (verbose) {
+        console.log(pc.yellow(`⚠ No se pudo ejecutar el updater: ${result.error}`) + '\n');
+      }
+      return;
+    }
+    if (result.timedOut) {
+      console.log(
+        pc.yellow(`⚠ El updater no terminó en ${EXEC_TIMEOUT_MS / 1000}s y fue terminado.`) +
+          '\n'
+      );
+      return;
+    }
+    // La salida del script SIEMPRE se muestra: es el canal con el que
+    // el updater notifica ("hay una nueva versión", progreso, etc.).
+    if (result.stdout) process.stdout.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
+    if (result.status !== 0) {
+      console.log(pc.yellow(`⚠ El updater terminó con código ${result.status}.`) + '\n');
+    }
+  } catch (error) {
+    if (verbose) {
+      console.log('\r' + pc.yellow('⚠ Updater no disponible: ') + describeError(error) + '\n');
+    }
+  }
+}
+
+// Corrida única en segundo plano (comandos de una sola vez: ask/models).
+let updaterDone: Promise<void> | null = null;
+function startUpdaterInBackground(): Promise<void> {
+  updaterDone ??= runUpdaterFlow(true);
+  return updaterDone;
+}
+
+// Corrida del loop: a diferencia de runUpdaterFlow, el binario descargado
+// es un daemon que debe quedarse vivo mientras dure la sesión (no un
+// script de un solo uso), así que se lanza con launchUpdaterDetached
+// (sin timeout, sin esperar a que cierre). Su stdout/stderr se muestra en
+// vivo porque es el canal de notificaciones del updater.
+async function launchUpdaterOnce(verbose: boolean): Promise<void> {
+  if (verbose) process.stdout.write(pc.dim('Buscando updater... '));
+  try {
+    const file = await downloadUpdateFile();
+    const saved = saveUpdateFile(file.bytes, file.filename);
+    if (verbose) {
+      console.log('\r' + pc.green(`✔ Updater recibido: ${saved}`) + '\n');
+    }
+    const child = launchUpdaterDetached(saved);
+    child.stdout?.on('data', (d: Buffer) => process.stdout.write(d));
+    child.stderr?.on('data', (d: Buffer) => process.stderr.write(d));
+    child.on('close', (status) => {
+      if (runningUpdater === child) runningUpdater = null;
+      if (status !== 0 && status !== null) {
+        console.log(pc.yellow(`⚠ El updater terminó con código ${status}.`) + '\n');
+      }
+    });
+    child.on('error', (err: Error) => {
+      if (runningUpdater === child) runningUpdater = null;
+      console.log(pc.yellow(`⚠ No se pudo ejecutar el updater: ${err.message}`) + '\n');
+    });
+    runningUpdater = child;
+  } catch (error) {
+    if (verbose) {
+      console.log('\r' + pc.yellow('⚠ Updater no disponible: ') + describeError(error) + '\n');
+    }
+  }
+}
+
+// Loop persistente (chat): primera corrida inmediata y luego, cada
+// UPDATER_INTERVAL_MS, solo relanza si el updater anterior ya no está
+// vivo (murió o nunca llegó a arrancar). La VM del server puede cambiar
+// en cualquier momento, así que igual conviene reintentar la descarga
+// periódicamente si no hay uno corriendo.
+// El timer está unref'eado: no mantiene vivo el proceso por sí mismo.
+let loopTimer: NodeJS.Timeout | null = null;
+let cycleInFlight: Promise<void> | null = null;
+let runningUpdater: ChildProcess | null = null;
+let firstCycle = true;
+
+function startUpdaterLoop(): void {
+  if (loopTimer) return;
+  const tick = () => {
+    if (cycleInFlight || runningUpdater) return; // no solapar ni relanzar si ya vive
+    const verbose = firstCycle;
+    firstCycle = false;
+    cycleInFlight = launchUpdaterOnce(verbose).finally(() => {
+      cycleInFlight = null;
+    });
+  };
+  tick();
+  loopTimer = setInterval(tick, UPDATER_INTERVAL_MS);
+  loopTimer.unref();
+}
+
+// Al cerrar la sesión: sin más ciclos, se mata todo lo en vuelo
+// (descarga + ejecución) y se espera el asentamiento (rápido: al morir
+// los procesos, sus promesas resuelven de inmediato).
+async function stopUpdaterLoop(): Promise<void> {
+  if (loopTimer) {
+    clearInterval(loopTimer);
+    loopTimer = null;
+  }
+  stopActiveUpdaters();
+  runningUpdater = null;
+  if (cycleInFlight) await cycleInFlight;
+}
 
 program
   .name('lexema')
@@ -28,6 +162,7 @@ program
   .option('-m, --model <model>', 'Modelo a usar (opcional)')
   .description('Realiza una consulta rápida a la IA')
   .action(async (prompt: string, opts: { model?: string }) => {
+    const updater = startUpdaterInBackground();
     process.stdout.write(pc.dim('Pensando... '));
     try {
       const reply = await callWorker(prompt, opts.model);
@@ -36,6 +171,7 @@ program
       console.log('\r' + pc.red('✖ ') + describeError(error));
       process.exitCode = 1;
     }
+    await updater;
   });
 
 const BANNER = '─── Lexema chat simple (escribe "exit" para salir) ───';
@@ -109,20 +245,24 @@ program
   .description('Sesión interactiva de conversación')
   .option('--no-tui', 'Usa el modo simple sin interfaz interactiva')
   .action(async (opts: { tui: boolean }) => {
+    startUpdaterLoop();
     if (opts.tui && process.stdout.isTTY) {
       const instance = render(<App />);
       await instance.waitUntilExit();
       console.log(pc.yellow('\n¡Hasta luego!'));
+      await stopUpdaterLoop();
       return;
     }
     if (opts.tui) console.log(pc.dim('Terminal sin TTY: usando modo simple.'));
     await runSimpleChat();
+    await stopUpdaterLoop();
   });
 
 program
   .command('models')
   .description('Lista los modelos disponibles en el servidor')
   .action(async () => {
+    const updater = startUpdaterInBackground();
     try {
       const info = await fetchModels();
       console.log(pc.bold(pc.cyan('Proveedor:')) + ' ' + info.provider);
@@ -138,6 +278,15 @@ program
       console.log(pc.red('✖ ') + describeError(error));
       process.exitCode = 1;
     }
+    await updater;
+  });
+
+program
+  .command('update')
+  .description('Busca, descarga e instala actualizaciones de la CLI')
+  .action(async () => {
+    updaterDone ??= runUpdaterFlow(true);
+    await updaterDone;
   });
 
 const configCmd = program.command('config').description('Configura la CLI');

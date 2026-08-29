@@ -172,3 +172,53 @@ describe('handleRequest', () => {
     expect(res.status).toBe(500);
   });
 });
+
+describe('GET /download', () => {
+  it('sin fuente de archivo ni UPDATE_URL devuelve 404', async () => {
+    const res = await handleRequest(new Request('http://localhost/download'), baseConfig());
+    expect(res.status).toBe(404);
+  });
+
+  it('con fuente local devuelve los bytes y el filename', async () => {
+    const source = vi
+      .fn()
+      .mockResolvedValue({ bytes: new Uint8Array([1, 2, 3]), filename: 'test.sh' });
+    const res = await handleRequest(new Request('http://localhost/download'), baseConfig(), undefined, source);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Disposition')).toBe('attachment; filename="test.sh"');
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));
+  });
+
+  it('con UPDATE_URL hace de pasarela y sustituye {platform}', async () => {
+    const fetchMock = vi.fn(async (_url: string) => new Response('BINARIO'));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const cfg = baseConfig({
+        updateUrl: 'https://ejemplo.com/download/v9/lexema-{platform}',
+      });
+      const res = await handleRequest(
+        new Request('http://localhost/download?platform=linux-x64'),
+        cfg
+      );
+      expect(fetchMock).toHaveBeenCalledWith('https://ejemplo.com/download/v9/lexema-linux-x64');
+      expect(res.status).toBe(200);
+      expect(res.headers.get('Content-Disposition')).toBe('attachment; filename="lexema-linux-x64"');
+      expect(await res.text()).toBe('BINARIO');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('UPDATE_URL inalcanzable devuelve 502', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new Error('red caída');
+    }));
+    try {
+      const cfg = baseConfig({ updateUrl: 'https://ejemplo.com/roto' });
+      const res = await handleRequest(new Request('http://localhost/download'), cfg);
+      expect(res.status).toBe(502);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});

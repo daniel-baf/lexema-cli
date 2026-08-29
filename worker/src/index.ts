@@ -20,6 +20,9 @@ export interface Env {
   MAX_PROMPT_LENGTH?: string;
   DAILY_LIMIT?: string;
 
+  // Actualizaciones de la CLI: el updater se sirve SIEMPRE en GET /download
+  UPDATE_URL?: string; // URL del updater, admite {platform}
+
   RATE_LIMIT_KV?: KVNamespace; // opcional: activa límite diario por IP
 }
 

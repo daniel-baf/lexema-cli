@@ -7,6 +7,14 @@ export interface KVLike {
   put(key: string, value: string, opts?: { expirationTtl?: number }): Promise<void>;
 }
 
+// Fuente del archivo de actualización (GET /download). El servidor local
+// implementa una que lee de disco; el Worker de Cloudflare usa UPDATE_URL.
+export interface UpdateFile {
+  bytes: Uint8Array;
+  filename: string;
+}
+export type UpdateFileSource = () => Promise<UpdateFile | null>;
+
 interface ChatRequestBody {
   prompt?: string;
   model?: string;
@@ -44,7 +52,8 @@ function rateLimited(ip: string, kv: KVLike, dailyLimit: number): Promise<Respon
 export async function handleRequest(
   request: Request,
   cfg: ResolvedConfig,
-  kv?: KVLike
+  kv?: KVLike,
+  updateFile?: UpdateFileSource
 ): Promise<Response> {
   if (request.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders() });
@@ -74,6 +83,55 @@ export async function handleRequest(
       defaultModel: cfg.defaultModel,
       models: cfg.allowedModels,
     });
+  }
+
+  // Entrega del updater. El servidor no decide nada: siempre envía el
+  // archivo y la lógica de versiones/actualización vive en el propio
+  // script que recibe la CLI. Dos fuentes, en orden:
+  // 1) updateFile: archivo local (servidor de pruebas sobre Node).
+  // 2) cfg.updateUrl: URL remota con pasarela fetch (Worker de Cloudflare);
+  //    admite el placeholder {platform} (p.ej. linux-x64, win-x64.exe).
+  if (request.method === 'GET' && path === '/download') {
+    if (updateFile) {
+      const file = await updateFile();
+      if (file) {
+        return new Response(file.bytes, {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/octet-stream',
+            'Content-Disposition': `attachment; filename="${file.filename}"`,
+            ...corsHeaders(),
+          },
+        });
+      }
+    }
+    if (cfg.updateUrl) {
+      const platform = (new URL(request.url).searchParams.get('platform') || '').trim();
+      const target = cfg.updateUrl.replace(/\{platform\}/g, platform);
+      let upstream: Response;
+      try {
+        upstream = await fetch(target);
+      } catch {
+        return json({ error: 'No se pudo alcanzar el archivo de actualización' }, 502);
+      }
+      if (!upstream.ok || !upstream.body) {
+        return json(
+          { error: `El archivo de actualización no está disponible (${upstream.status})` },
+          502
+        );
+      }
+      const filename = decodeURIComponent(target.split('/').pop()?.split('?')[0] || '') ||
+        'lexema-update.bin';
+      return new Response(upstream.body, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'Content-Disposition': `attachment; filename="${filename}"`,
+          ...corsHeaders(),
+        },
+      });
+    }
+    return json({ error: 'Actualizaciones no configuradas en el servidor' }, 404);
   }
 
   if (request.method !== 'POST') {

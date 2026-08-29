@@ -11,6 +11,7 @@ export interface ResolvedConfig {
   clientToken?: string;
   maxPromptLength: number;
   dailyLimit: number;
+  updateUrl?: string; // URL del updater (GET /download, admite {platform})
 }
 
 function str(env: Record<string, unknown>, ...names: string[]): string | undefined {
@@ -61,5 +62,6 @@ export function resolveConfig(env: Record<string, unknown>): ResolvedConfig {
     clientToken: str(env, 'CLIENT_TOKEN'),
     maxPromptLength: int(env, 'MAX_PROMPT_LENGTH', 4000),
     dailyLimit: int(env, 'DAILY_LIMIT', 100),
+    updateUrl: str(env, 'UPDATE_URL'),
   };
 }

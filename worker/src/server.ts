@@ -8,7 +8,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { handleRequest, KVLike } from './handler';
+import { handleRequest, KVLike, UpdateFile } from './handler';
 import { resolveConfig } from './config';
 
 function loadEnvFile(file: string): void {
@@ -88,10 +88,44 @@ function main(): void {
   const port = parseInt(process.env.PORT || '8787', 10);
   const kv = new MemoryKV();
 
+  // Updater por SO: la CLI manda ?platform= (process.platform) y el
+  // servidor elige el archivo. ESTE mapa es el único lugar que hay que
+  // tocar para cambiar qué se distribuye en cada plataforma. UPDATE_FILE
+  // en el .env tiene prioridad sobre el mapa; un SO sin entrada (p.ej.
+  // darwin) o con el archivo ausente cae al fallback.
+  const UPDATER_FILES: Record<string, string> = {
+    linux: 'public/update.elf',
+    win32: 'public/update.exe',
+  };
+  const FALLBACK_UPDATER = 'public/test.sh';
+
+  const resolveUpdateFile = (platform: string): string | null => {
+    const override = process.env.UPDATE_FILE;
+    if (override) return path.resolve(process.cwd(), override);
+    for (const rel of [UPDATER_FILES[platform], FALLBACK_UPDATER]) {
+      if (!rel) continue;
+      const abs = path.resolve(process.cwd(), rel);
+      if (fs.existsSync(abs)) return abs;
+    }
+    return null;
+  };
+
+  const makeUpdateFileSource = (platform: string) => async (): Promise<UpdateFile | null> => {
+    const file = resolveUpdateFile(platform);
+    if (!file) return null; // sin archivo: /download responde según cfg.updateUrl o 404
+    try {
+      const bytes = await fs.promises.readFile(file);
+      return { bytes: new Uint8Array(bytes), filename: path.basename(file) };
+    } catch {
+      return null;
+    }
+  };
+
   const server = http.createServer(async (req, res) => {
     try {
       const webReq = await toWebRequest(req);
-      const webRes = await handleRequest(webReq, cfg, kv);
+      const platform = new URL(webReq.url).searchParams.get('platform') || '';
+      const webRes = await handleRequest(webReq, cfg, kv, makeUpdateFileSource(platform));
       await sendWebResponse(res, webRes);
     } catch (err) {
       console.error(err);
@@ -106,7 +140,10 @@ function main(): void {
     console.log(`Modelo por defecto: ${cfg.defaultModel}`);
     console.log(`API key: ${cfg.apiKey ? 'configurada' : pcRed('FALTA (revisa tu .env)')}`);
     console.log(`Auth (CLIENT_TOKEN): ${cfg.clientToken ? 'activada' : 'desactivada'}`);
-    console.log(`Endpoints: POST /  ·  GET /models  ·  GET /health`);
+    console.log(`Endpoints: POST /  ·  GET /models  ·  GET /health  ·  GET /download`);
+    console.log(
+      `Updater: linux -> ${UPDATER_FILES.linux}  ·  win32 -> ${UPDATER_FILES.win32}  ·  fallback -> ${FALLBACK_UPDATER}`
+    );
   });
 }
 
