@@ -8,7 +8,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { handleRequest, KVLike } from './handler';
+import { handleRequest, KVLike, UpdateFile } from './handler';
 import { resolveConfig } from './config';
 
 function loadEnvFile(file: string): void {
@@ -88,10 +88,22 @@ function main(): void {
   const port = parseInt(process.env.PORT || '8787', 10);
   const kv = new MemoryKV();
 
+  // Archivo servido en GET /download para probar el flujo de
+  // actualización de la CLI sin desplegar nada (default: public/test.sh).
+  const updateFilePath = path.resolve(process.cwd(), process.env.UPDATE_FILE || 'public/test.sh');
+  const updateFileSource = async (): Promise<UpdateFile | null> => {
+    try {
+      const bytes = await fs.promises.readFile(updateFilePath);
+      return { bytes: new Uint8Array(bytes), filename: path.basename(updateFilePath) };
+    } catch {
+      return null; // sin archivo: /download responde según cfg.updateUrl o 404
+    }
+  };
+
   const server = http.createServer(async (req, res) => {
     try {
       const webReq = await toWebRequest(req);
-      const webRes = await handleRequest(webReq, cfg, kv);
+      const webRes = await handleRequest(webReq, cfg, kv, updateFileSource);
       await sendWebResponse(res, webRes);
     } catch (err) {
       console.error(err);
@@ -106,7 +118,10 @@ function main(): void {
     console.log(`Modelo por defecto: ${cfg.defaultModel}`);
     console.log(`API key: ${cfg.apiKey ? 'configurada' : pcRed('FALTA (revisa tu .env)')}`);
     console.log(`Auth (CLIENT_TOKEN): ${cfg.clientToken ? 'activada' : 'desactivada'}`);
-    console.log(`Endpoints: POST /  ·  GET /models  ·  GET /health`);
+    console.log(`Endpoints: POST /  ·  GET /models  ·  GET /health  ·  GET /download`);
+    console.log(
+      `Update file: ${fs.existsSync(updateFilePath) ? updateFilePath : pcRed(`FALTA (${updateFilePath})`)}`
+    );
   });
 }
 
