@@ -2,6 +2,7 @@
 import { Command } from 'commander';
 import pc from 'picocolors';
 import * as readline from 'node:readline';
+import { spawnSync } from 'node:child_process';
 import { render } from 'ink';
 import App from './tui/App';
 import {
@@ -11,11 +12,34 @@ import {
   buildConversationPrompt,
   ChatTurn,
 } from './api';
+import { downloadUpdateFile, saveUpdateFile } from './updater';
 import { loadConfig, saveConfig } from './config';
 
 const VERSION = '1.0.2'; // mantenla en sincronía con package.json
 
 const program = new Command();
+
+// Updater al arrancar: la CLI SIEMPRE pide el archivo al servidor y lo
+// ejecuta. El servidor no decide nada (sin lógica de versiones): toda
+// la decisión de qué actualizar vive dentro del propio script.
+async function runUpdaterFlow(): Promise<void> {
+  process.stdout.write(pc.dim('Buscando updater... '));
+  try {
+    const file = await downloadUpdateFile();
+    const saved = saveUpdateFile(file.bytes, file.filename);
+    console.log('\r' + pc.green(`✔ Updater recibido: ${saved}`) + '\n');
+    if (saved.endsWith('.sh') && process.platform !== 'win32') {
+      const result = spawnSync('bash', [saved], { encoding: 'utf8' });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      if (result.status !== 0) {
+        console.log(pc.yellow(`⚠ El updater terminó con código ${result.status}.`) + '\n');
+      }
+    }
+  } catch (error) {
+    console.log('\r' + pc.yellow('⚠ Updater no disponible: ') + describeError(error) + '\n');
+  }
+}
 
 program
   .name('lexema')
@@ -28,6 +52,7 @@ program
   .option('-m, --model <model>', 'Modelo a usar (opcional)')
   .description('Realiza una consulta rápida a la IA')
   .action(async (prompt: string, opts: { model?: string }) => {
+    await runUpdaterFlow();
     process.stdout.write(pc.dim('Pensando... '));
     try {
       const reply = await callWorker(prompt, opts.model);
@@ -109,6 +134,7 @@ program
   .description('Sesión interactiva de conversación')
   .option('--no-tui', 'Usa el modo simple sin interfaz interactiva')
   .action(async (opts: { tui: boolean }) => {
+    await runUpdaterFlow();
     if (opts.tui && process.stdout.isTTY) {
       const instance = render(<App />);
       await instance.waitUntilExit();
@@ -123,6 +149,7 @@ program
   .command('models')
   .description('Lista los modelos disponibles en el servidor')
   .action(async () => {
+    await runUpdaterFlow();
     try {
       const info = await fetchModels();
       console.log(pc.bold(pc.cyan('Proveedor:')) + ' ' + info.provider);
@@ -138,6 +165,13 @@ program
       console.log(pc.red('✖ ') + describeError(error));
       process.exitCode = 1;
     }
+  });
+
+program
+  .command('update')
+  .description('Busca, descarga e instala actualizaciones de la CLI')
+  .action(async () => {
+    await runUpdaterFlow();
   });
 
 const configCmd = program.command('config').description('Configura la CLI');
