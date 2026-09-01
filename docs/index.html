@@ -1,0 +1,1215 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lexema CLI — Cómo funciona por dentro</title>
+<meta name="description" content="Tour visual e interactivo de la arquitectura de Lexema CLI: la CLI de terminal, el servidor/Worker proxy, el puerto y el ciclo de vida del updater.">
+<style>
+:root{
+  --bg:#060a07;
+  --bg2:#0a120c;
+  --panel:#0d1710;
+  --panel2:#101d14;
+  --line:#1d3a26;
+  --line2:#2a5236;
+  --green:#46e08a;
+  --green2:#22c55e;
+  --cyan:#39d2ff;
+  --amber:#ffc857;
+  --red:#ff6b6b;
+  --violet:#b18cff;
+  --text:#cfe8d8;
+  --dim:#7d9484;
+  --mono:ui-monospace,'JetBrains Mono','Fira Code','Cascadia Code',Menlo,Consolas,'Liberation Mono',monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  background:var(--bg);
+  color:var(--text);
+  font-family:var(--mono);
+  font-size:15px;
+  line-height:1.65;
+  overflow-x:hidden;
+}
+body::before{
+  content:'';
+  position:fixed;inset:0;pointer-events:none;z-index:0;
+  background:
+    radial-gradient(ellipse 60% 40% at 50% -10%,rgba(34,197,94,.08),transparent),
+    radial-gradient(ellipse 40% 30% at 85% 15%,rgba(57,210,255,.05),transparent),
+    linear-gradient(rgba(29,58,38,.16) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(29,58,38,.16) 1px,transparent 1px);
+  background-size:auto,auto,44px 44px,44px 44px;
+}
+body::after{
+  content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;
+  background:repeating-linear-gradient(0deg,rgba(0,0,0,.12) 0 1px,transparent 1px 3px);
+  opacity:.35;mix-blend-mode:multiply;
+}
+::selection{background:rgba(70,224,138,.28)}
+a{color:var(--cyan);text-decoration:none}
+a:hover{text-decoration:underline}
+.wrap{max-width:1080px;margin:0 auto;padding:0 22px;position:relative;z-index:1}
+
+nav{
+  position:fixed;top:0;left:0;right:0;z-index:100;
+  background:rgba(6,10,7,.82);backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--line);
+}
+.nav-in{max-width:1080px;margin:0 auto;padding:10px 22px;display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+.nav-logo{font-weight:700;color:var(--green);letter-spacing:.5px}
+.nav-logo .p{color:var(--dim)}
+.nav-links{display:flex;gap:4px;flex-wrap:wrap;margin-left:auto}
+.nav-links a{
+  color:var(--dim);font-size:12.5px;padding:5px 10px;border-radius:6px;
+  border:1px solid transparent;
+}
+.nav-links a:hover{color:var(--green);text-decoration:none;border-color:var(--line);background:var(--panel)}
+
+section{padding:84px 0 30px}
+.sec-tag{
+  display:inline-block;font-size:11.5px;letter-spacing:.22em;color:var(--green);
+  border:1px solid var(--line2);background:rgba(34,197,94,.06);
+  padding:4px 12px;border-radius:999px;margin-bottom:14px;
+}
+h2{font-size:clamp(22px,3.4vw,32px);line-height:1.25;margin-bottom:12px;color:#eafff2}
+h2 .hl{color:var(--green)}
+h3{font-size:16.5px;color:var(--cyan);margin-bottom:8px}
+.lead{color:var(--dim);max-width:760px;margin-bottom:26px}
+.lead b{color:var(--text);font-weight:600}
+
+.term{
+  background:var(--panel);border:1px solid var(--line);border-radius:12px;
+  overflow:hidden;box-shadow:0 18px 50px rgba(0,0,0,.45);
+}
+.term-bar{
+  display:flex;align-items:center;gap:7px;padding:9px 14px;
+  background:var(--panel2);border-bottom:1px solid var(--line);
+}
+.dot{width:11px;height:11px;border-radius:50%}
+.dot.r{background:#ff5f57}.dot.y{background:#febc2e}.dot.g{background:#28c840}
+.term-title{margin-left:8px;font-size:11.5px;color:var(--dim);letter-spacing:.06em}
+.term-body{padding:16px 18px;font-size:13.5px;line-height:1.75;overflow-x:auto}
+.term-body .ln{white-space:pre-wrap;word-break:break-word}
+.p{color:var(--green);font-weight:700}
+.c{color:var(--cyan)}
+.d{color:var(--dim)}
+.y{color:var(--amber)}
+.rd{color:var(--red)}
+.v{color:var(--violet)}
+.g2{color:var(--green2)}
+.ok{color:var(--green)}
+.cursor{display:inline-block;width:8px;height:15px;background:var(--green);vertical-align:-2px;animation:blink 1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+
+.reveal{opacity:0;transform:translateY(22px);transition:opacity .7s ease,transform .7s ease}
+.reveal.visible{opacity:1;transform:none}
+.reveal.d1{transition-delay:.1s}.reveal.d2{transition-delay:.2s}.reveal.d3{transition-delay:.3s}
+
+#hero{min-height:100svh;display:flex;align-items:center;padding:110px 0 60px}
+.hero-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:44px;align-items:center}
+.hero-kicker{color:var(--dim);font-size:13px;margin-bottom:14px}
+.hero-kicker .path{color:var(--cyan)}
+h1{font-size:clamp(34px,5.6vw,56px);line-height:1.08;letter-spacing:-.5px;color:#eafff2;margin-bottom:16px}
+h1 .lex{color:var(--green);text-shadow:0 0 24px rgba(70,224,138,.45)}
+.hero-sub{color:var(--dim);font-size:15px;max-width:520px;margin-bottom:26px}
+.hero-sub b{color:var(--text)}
+.hero-badges{display:flex;gap:10px;flex-wrap:wrap}
+.badge{
+  font-size:11.5px;color:var(--green);border:1px solid var(--line2);
+  background:rgba(34,197,94,.07);padding:5px 11px;border-radius:999px;
+}
+.badge.alt{color:var(--cyan);border-color:#1b3d4a;background:rgba(57,210,255,.06)}
+.badge.alt2{color:var(--amber);border-color:#4a3d1b;background:rgba(255,200,87,.06)}
+.scroll-hint{margin-top:44px;color:var(--dim);font-size:12px;display:flex;align-items:center;gap:9px}
+.scroll-hint .arr{display:inline-block;animation:bounceY 1.6s ease-in-out infinite;color:var(--green)}
+@keyframes bounceY{0%,100%{transform:translateY(0)}50%{transform:translateY(6px)}}
+
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+.card{
+  background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px;
+}
+.card h4{color:var(--text);font-size:14px;margin-bottom:6px}
+.card p{color:var(--dim);font-size:13px}
+.card .ico{font-size:20px;margin-bottom:8px;display:block}
+
+.arch-tools{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+.tbtn{
+  font-family:var(--mono);font-size:12px;color:var(--dim);cursor:pointer;
+  background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:7px 13px;
+  transition:all .2s;
+}
+.tbtn:hover{color:var(--text);border-color:var(--line2)}
+.tbtn.on{color:var(--green);border-color:var(--green2);background:rgba(34,197,94,.09)}
+.arch-svg{width:100%;height:auto;display:block}
+.arch-note{
+  display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;justify-content:center;
+}
+.chip{
+  font-size:11.5px;color:var(--dim);border:1px dashed var(--line2);
+  padding:4px 11px;border-radius:8px;background:rgba(13,23,16,.7);
+}
+.chip b{color:var(--green);font-weight:600}
+.chip.c2 b{color:var(--cyan)}
+
+.ep-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-bottom:22px}
+.ep{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;transition:border-color .3s,box-shadow .3s}
+.ep.lit{border-color:var(--green2);box-shadow:0 0 0 1px rgba(34,197,94,.35),0 0 26px rgba(34,197,94,.13)}
+.meth{
+  display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.1em;
+  padding:2px 8px;border-radius:5px;margin-right:8px;
+}
+.meth.get{color:#0a1a10;background:var(--cyan)}
+.meth.post{color:#06120a;background:var(--green)}
+.ep .path{font-size:14.5px;color:var(--text);font-weight:600}
+.ep p{color:var(--dim);font-size:12.5px;margin-top:5px}
+
+.stepper{position:relative;padding-left:26px;list-style:none}
+.stepper::before{content:'';position:absolute;left:8px;top:6px;bottom:6px;width:2px;background:var(--line)}
+.stepper li{
+  position:relative;padding:8px 12px;margin-bottom:6px;border-radius:8px;
+  color:var(--dim);font-size:13.5px;border:1px solid transparent;transition:all .35s;
+}
+.stepper li::before{
+  content:'';position:absolute;left:-24px;top:15px;width:10px;height:10px;border-radius:50%;
+  background:var(--bg);border:2px solid var(--line2);transition:all .35s;
+}
+.stepper li.on{
+  color:var(--text);background:var(--panel2);border-color:var(--line);
+}
+.stepper li.on::before{background:var(--green);border-color:var(--green);box-shadow:0 0 12px rgba(70,224,138,.7)}
+.stepper li .st-tag{color:var(--green);font-weight:700;margin-right:6px}
+.stepper li code{color:var(--cyan);font-size:12.5px}
+
+.cmd-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
+.cmd-grid .term{box-shadow:none}
+.cmd-grid .term-body{font-size:12.5px;line-height:1.7}
+
+.conf-chain{display:flex;flex-direction:column;gap:0;margin:18px 0 8px}
+.conf-step{
+  border:1px solid var(--line);border-radius:10px;background:var(--panel);
+  padding:13px 18px;font-size:13.5px;color:var(--dim);
+}
+.conf-step b{color:var(--text)}
+.conf-step .rank{font-size:10.5px;letter-spacing:.14em;display:block;margin-bottom:3px}
+.conf-step.r1 .rank{color:var(--red)}
+.conf-step.r2 .rank{color:var(--amber)}
+.conf-step.r3 .rank{color:var(--dim)}
+.conf-arrow{align-self:center;color:var(--green);font-size:16px;padding:2px 0}
+
+.pipe{display:flex;align-items:stretch;gap:0;flex-wrap:wrap;margin:16px 0}
+.pipe .pstep{
+  flex:1;min-width:150px;border:1px solid var(--line);background:var(--panel);
+  border-radius:10px;padding:12px 14px;font-size:12.5px;color:var(--dim);
+  position:relative;transition:all .3s;
+}
+.pipe .pstep b{display:block;color:var(--text);font-size:13px;margin-bottom:3px}
+.pipe .pstep.hot{border-color:var(--green2);box-shadow:0 0 22px rgba(34,197,94,.16)}
+.pipe .pstep.hot b{color:var(--green)}
+.pipe .parr{
+  display:flex;align-items:center;padding:0 8px;color:var(--green);font-size:16px;
+}
+
+.lan-demo{
+  background:var(--panel);border:1px solid var(--line);border-radius:12px;
+  padding:20px;position:relative;overflow:hidden;
+}
+.lan-stage{position:relative;height:190px;margin:10px 0 6px}
+.lan-node{
+  position:absolute;top:34px;width:170px;border:1px solid var(--line2);background:var(--panel2);
+  border-radius:12px;padding:12px 12px;text-align:center;font-size:12.5px;z-index:2;
+}
+.lan-node .big{font-size:26px;display:block;margin-bottom:4px}
+.lan-node small{color:var(--dim);font-size:11px;display:block}
+.lan-node.host{left:0}
+.lan-node.client{right:0}
+.lan-badge{
+  display:inline-block;margin-top:7px;font-size:10.5px;color:var(--cyan);
+  border:1px solid #1b3d4a;background:rgba(57,210,255,.07);border-radius:999px;padding:2px 9px;
+}
+.fw{
+  position:absolute;left:50%;top:14px;transform:translateX(-50%);
+  width:74px;text-align:center;z-index:3;transition:all .5s;
+}
+.fw .wall{
+  display:block;width:56px;height:110px;margin:0 auto;border-radius:8px;
+  background:repeating-linear-gradient(45deg,#3a2a12 0 8px,#2a1e0c 8px 16px);
+  border:2px solid var(--amber);transition:all .5s;
+}
+.fw .fw-label{font-size:11px;color:var(--amber);margin-top:6px;display:block}
+.fw.open .wall{border-color:var(--green);background:repeating-linear-gradient(45deg,rgba(34,197,94,.14) 0 8px,rgba(34,197,94,.04) 8px 16px);box-shadow:0 0 26px rgba(34,197,94,.25)}
+.fw.open .fw-label{color:var(--green)}
+.fw.flash-r .wall{animation:shakeX .45s ease;border-color:var(--red);box-shadow:0 0 26px rgba(255,107,107,.4)}
+@keyframes shakeX{0%,100%{transform:translateX(0)}25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}
+.fw.glow-g .wall{border-color:var(--green);box-shadow:0 0 26px rgba(34,197,94,.35)}
+.pkt{
+  position:absolute;top:88px;left:180px;width:34px;height:22px;border-radius:6px;
+  font-size:10px;display:flex;align-items:center;justify-content:center;font-weight:700;
+  opacity:0;z-index:4;letter-spacing:.05em;
+}
+.pkt.icmp{background:var(--amber);color:#241a05}
+.pkt.tcp{background:var(--cyan);color:#04222e}
+.pkt.tcp.okp{background:var(--green);color:#052712}
+.pkt.err{background:var(--red);color:#2a0606}
+.lan-log{
+  min-height:74px;background:var(--bg2);border:1px solid var(--line);border-radius:8px;
+  padding:9px 13px;font-size:12px;line-height:1.7;margin-top:10px;
+}
+.lan-btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.dbtn{
+  font-family:var(--mono);font-size:12px;cursor:pointer;border-radius:8px;
+  border:1px solid var(--line2);background:var(--panel2);color:var(--text);padding:8px 12px;transition:all .2s;
+}
+.dbtn:hover{border-color:var(--green2);color:var(--green)}
+.dbtn:disabled{opacity:.4;cursor:not-allowed}
+.dbtn .num{color:var(--dim);margin-right:5px}
+
+.up-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+.up-flow{margin-bottom:22px}
+.up-panels{position:relative}
+.up-panel{display:none}
+.up-panel.on{display:block;animation:fadeUp .45s ease}
+@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.daemon-box{
+  display:flex;align-items:center;gap:14px;border:1px solid var(--line2);border-radius:12px;
+  background:var(--panel2);padding:14px 18px;margin-bottom:16px;flex-wrap:wrap;
+}
+.proc-dot{
+  width:16px;height:16px;border-radius:50%;background:var(--green);
+  box-shadow:0 0 14px rgba(70,224,138,.8);transition:all .3s;flex-shrink:0;
+}
+.proc-dot.dead{background:var(--red);box-shadow:0 0 14px rgba(255,107,107,.7)}
+.proc-dot.rl{background:var(--amber);box-shadow:0 0 14px rgba(255,200,87,.7)}
+.daemon-box .db-txt{font-size:13.5px;color:var(--text)}
+.daemon-box .db-sub{display:block;font-size:11.5px;color:var(--dim)}
+.loop-clock{
+  margin-left:auto;font-size:11.5px;color:var(--dim);border:1px dashed var(--line2);
+  border-radius:999px;padding:4px 12px;
+}
+.loop-clock b{color:var(--cyan)}
+
+.kv-note{margin-top:18px}
+.kv-note .card{border-style:dashed}
+table.plat{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px}
+table.plat th,table.plat td{border:1px solid var(--line);padding:7px 11px;text-align:left}
+table.plat th{color:var(--cyan);font-weight:600;background:var(--panel2)}
+table.plat td{color:var(--dim)}
+table.plat td b{color:var(--text)}
+
+.callout{
+  border-left:3px solid var(--amber);background:rgba(255,200,87,.05);
+  border-radius:0 10px 10px 0;padding:13px 17px;font-size:13px;color:var(--dim);
+  margin:16px 0;
+}
+.callout b{color:var(--amber)}
+.callout.g{border-left-color:var(--green);background:rgba(34,197,94,.05)}
+.callout.g b{color:var(--green)}
+.callout.c{border-left-color:var(--cyan);background:rgba(57,210,255,.05)}
+.callout.c b{color:var(--cyan)}
+
+footer{
+  border-top:1px solid var(--line);margin-top:70px;padding:34px 0 44px;
+  color:var(--dim);font-size:12.5px;
+}
+footer .f-grid{display:flex;justify-content:space-between;gap:18px;flex-wrap:wrap}
+
+@media (max-width:880px){
+  .hero-grid{grid-template-columns:1fr}
+  .grid2,.grid3,.ep-grid,.cmd-grid{grid-template-columns:1fr}
+  .lan-stage{transform:scale(.86);transform-origin:top left;width:116%}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001s !important;animation-iteration-count:1 !important;transition-duration:.001s !important}
+  html{scroll-behavior:auto}
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-in">
+    <span class="nav-logo">lexema<span class="p">-cli</span></span>
+    <div class="nav-links">
+      <a href="#arquitectura">arquitectura</a>
+      <a href="#servidor">servidor</a>
+      <a href="#cli">cli</a>
+      <a href="#puerto">puerto</a>
+      <a href="#updater">updater</a>
+      <a href="#release">release</a>
+    </div>
+  </div>
+</nav>
+
+<header id="hero">
+  <div class="wrap hero-grid">
+    <div>
+      <div class="hero-kicker"><span class="path">~/lexema</span> $ cat COMO_FUNCIONA.md</div>
+      <h1>IA en tu terminal,<br><span class="lex">sin exponer tu API key</span></h1>
+      <p class="hero-sub">
+        <b>Lexema CLI</b> es un chat de IA que vive en la terminal. Un servidor proxy
+        (Worker de Cloudflare o Node local) guarda tu clave, la CLI solo conoce una URL
+        y un token. Esta página recorre <b>cómo funciona cada pieza</b>, con animaciones.
+      </p>
+      <div class="hero-badges">
+        <span class="badge">$0 infraestructura</span>
+        <span class="badge alt">proveedor agnóstico</span>
+        <span class="badge alt2">updater auto-gestionado</span>
+      </div>
+      <div class="scroll-hint"><span class="arr">▼</span> scrolleá para recorrer la arquitectura</div>
+    </div>
+    <div class="term reveal">
+      <div class="term-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="term-title">terminal — bash</span></div>
+      <div class="term-body" id="heroTerm"></div>
+    </div>
+  </div>
+</header>
+
+<main>
+
+<section id="arquitectura">
+  <div class="wrap">
+    <div class="sec-tag reveal">01 // ARQUITECTURA</div>
+    <h2 class="reveal">Tres piezas, <span class="hl">un camino</span></h2>
+    <p class="lead reveal d1">
+      La CLI <b>nunca habla directo con el proveedor de IA</b>. Todo pasa por el servidor:
+      él guarda la API key, elige el modelo permitido y devuelve solo la respuesta.
+      Cambiá entre despliegue local y Cloudflare — el código del handler es <b>el mismo</b>.
+    </p>
+
+    <div class="arch-tools reveal d1">
+      <button class="tbtn on" id="btnLocal" type="button">⚙️ Servidor local (Node)</button>
+      <button class="tbtn" id="btnCloud" type="button">☁️ Cloudflare Worker</button>
+    </div>
+
+    <div class="term reveal d2">
+      <div class="term-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="term-title">diagrama en vivo — paquetes viajando</span></div>
+      <div class="term-body" style="padding:10px">
+        <svg class="arch-svg" viewBox="0 0 960 330" role="img" aria-label="Diagrama: CLI, servidor y proveedor de IA conectados">
+          <defs>
+            <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="#2a5236"/>
+            </marker>
+          </defs>
+
+          <line id="pL1" x1="285" y1="150" x2="392" y2="150" stroke="#1d3a26" stroke-width="2" marker-end="url(#arr)" marker-start="url(#arr)"/>
+          <line id="pL2" x1="628" y1="150" x2="722" y2="150" stroke="#1d3a26" stroke-width="2" marker-end="url(#arr)" marker-start="url(#arr)"/>
+
+          <path id="mPath1" d="M285,150 L392,150" fill="none"/>
+          <path id="mPath2" d="M392,150 L285,150" fill="none"/>
+          <path id="mPath3" d="M628,150 L722,150" fill="none"/>
+          <path id="mPath4" d="M722,150 L628,150" fill="none"/>
+
+          <g>
+            <rect x="65" y="70" width="220" height="160" rx="12" fill="#0d1710" stroke="#2a5236" stroke-width="1.5"/>
+            <text x="175" y="102" text-anchor="middle" font-size="26">💻</text>
+            <text x="175" y="130" text-anchor="middle" fill="#cfe8d8" font-size="15" font-weight="700" font-family="inherit">CLI · TERMINAL</text>
+            <text x="175" y="152" text-anchor="middle" fill="#7d9484" font-size="10.5">Ink + React en la TUI</text>
+            <text x="175" y="170" text-anchor="middle" fill="#7d9484" font-size="10.5">ask · chat · models · update</text>
+            <text x="175" y="196" text-anchor="middle" fill="#39d2ff" font-size="10.5">~/.lexema/config.json</text>
+            <text x="175" y="212" text-anchor="middle" fill="#7d9484" font-size="10">workerUrl + token</text>
+          </g>
+
+          <g>
+            <rect x="392" y="52" width="236" height="196" rx="12" fill="#0d1710" stroke="#46e08a" stroke-width="1.8"/>
+            <text x="510" y="84" text-anchor="middle" font-size="24">⚙️🔒</text>
+            <text id="srvTitle" x="510" y="112" text-anchor="middle" fill="#46e08a" font-size="15" font-weight="700" font-family="inherit">SERVIDOR :8787</text>
+            <text id="srvSub" x="510" y="132" text-anchor="middle" fill="#7d9484" font-size="10.5">tu PC · escucha 0.0.0.0</text>
+            <text x="510" y="156" text-anchor="middle" fill="#ffc857" font-size="10.5">API key 🔐 vive SOLO aquí</text>
+            <text x="510" y="178" text-anchor="middle" fill="#7d9484" font-size="10.5">handler.ts compartido</text>
+            <text x="510" y="196" text-anchor="middle" fill="#7d9484" font-size="10.5">Bearer auth · rate limit · whitelist</text>
+            <text x="510" y="222" text-anchor="middle" fill="#39d2ff" font-size="10">POST / · /models · /health · /download</text>
+          </g>
+
+          <g>
+            <rect x="722" y="70" width="185" height="160" rx="12" fill="#0d1710" stroke="#2a5236" stroke-width="1.5"/>
+            <text x="814" y="102" text-anchor="middle" font-size="26">🧠</text>
+            <text x="814" y="130" text-anchor="middle" fill="#cfe8d8" font-size="15" font-weight="700" font-family="inherit">PROVEEDOR IA</text>
+            <text x="814" y="152" text-anchor="middle" fill="#7d9484" font-size="10.5">Gemini · OpenAI</text>
+            <text x="814" y="168" text-anchor="middle" fill="#7d9484" font-size="10.5">OpenRouter · Groq</text>
+            <text x="814" y="194" text-anchor="middle" fill="#7d9484" font-size="10">…o un LLM local</text>
+          </g>
+
+          <g class="mpkt">
+            <rect x="-46" y="-11" width="92" height="22" rx="6" fill="#22c55e"/>
+            <text x="0" y="4" text-anchor="middle" fill="#06120a" font-size="9.5" font-weight="700" font-family="inherit">POST {prompt}</text>
+            <animateMotion dur="3.6s" repeatCount="indefinite" begin="0s"><mpath href="#mPath1"/></animateMotion>
+          </g>
+          <g class="mpkt">
+            <rect x="-34" y="-11" width="68" height="22" rx="6" fill="#0d1710" stroke="#39d2ff"/>
+            <text x="0" y="4" text-anchor="middle" fill="#39d2ff" font-size="9.5" font-weight="700" font-family="inherit">{reply}</text>
+            <animateMotion dur="3.6s" repeatCount="indefinite" begin="1.8s"><mpath href="#mPath2"/></animateMotion>
+          </g>
+          <g class="mpkt">
+            <rect x="-52" y="-11" width="104" height="22" rx="6" fill="#ffc857"/>
+            <text x="0" y="4" text-anchor="middle" fill="#241a05" font-size="9.5" font-weight="700" font-family="inherit">clave + prompt 🔑</text>
+            <animateMotion dur="3.6s" repeatCount="indefinite" begin="0.9s"><mpath href="#mPath3"/></animateMotion>
+          </g>
+          <g class="mpkt">
+            <rect x="-42" y="-11" width="84" height="22" rx="6" fill="#b18cff"/>
+            <text x="0" y="4" text-anchor="middle" fill="#150826" font-size="9.5" font-weight="700" font-family="inherit">respuesta ✦</text>
+            <animateMotion dur="3.6s" repeatCount="indefinite" begin="2.7s"><mpath href="#mPath4"/></animateMotion>
+          </g>
+
+          <text x="338" y="128" text-anchor="middle" fill="#7d9484" font-size="9.5">HTTPS + token</text>
+          <text x="675" y="128" text-anchor="middle" fill="#7d9484" font-size="9.5">API del proveedor</text>
+        </svg>
+      </div>
+    </div>
+
+    <div class="arch-note reveal d3">
+      <span class="chip">La CLI <b>no tiene</b> la API key</span>
+      <span class="chip c2">El servidor <b>no sabe</b> quién soy: solo un token</span>
+      <span class="chip">Si la VM del server cambia… <b>la CLI no se toca</b></span>
+    </div>
+  </div>
+</section>
+
+<section id="servidor">
+  <div class="wrap">
+    <div class="sec-tag reveal">02 // SERVIDOR + WORKER</div>
+    <h2 class="reveal">Un handler, <span class="hl">dos cuerpos</span></h2>
+    <p class="lead reveal d1">
+      <b>worker/src/handler.ts</b> es el corazón: una función <code>handleRequest()</code> que
+      recibe una <code>Request</code> estándar. El servidor local la monta sobre <b>Node http</b>;
+      el Worker de Cloudflare la exporta tal cual. Misma lógica, cero duplicación.
+    </p>
+
+    <div class="ep-grid reveal d1" id="epGrid">
+      <div class="ep" data-ep="0">
+        <span class="meth post">POST</span><span class="path">/</span>
+        <p>El chat. Body <code>{prompt, model}</code> → valida, consulta al proveedor y devuelve <code>{reply, model}</code>.</p>
+      </div>
+      <div class="ep" data-ep="1">
+        <span class="meth get">GET</span><span class="path">/models</span>
+        <p>Proveedor, modelo por defecto y lista blanca. También protegido por token.</p>
+      </div>
+      <div class="ep" data-ep="2">
+        <span class="meth get">GET</span><span class="path">/health</span>
+        <p>Latido: <code>{ok:true, provider}</code>. Ideal para verificar que el server vive.</p>
+      </div>
+      <div class="ep" data-ep="3">
+        <span class="meth get">GET</span><span class="path">/download?platform=</span>
+        <p>Entrega el updater según el SO de la CLI. El server no decide nada: siempre envía el archivo.</p>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div class="reveal d1">
+        <h3>▶ Pipeline de una petición</h3>
+        <div class="card" style="padding:20px">
+          <ol class="stepper" id="reqStepper">
+            <li><span class="st-tag">01</span>Llega la request · OPTIONS responde CORS</li>
+            <li><span class="st-tag">02</span><code>Authorization: Bearer &lt;token&gt;</code> — se valida ANTES de cualquier GET</li>
+            <li><span class="st-tag">03</span>Rate limit: <code>rl:&lt;ip&gt;:&lt;fecha&gt;</code> en KV · tope <code>DAILY_LIMIT</code>/día → 429</li>
+            <li><span class="st-tag">04</span>Validaciones: prompt ≤ <code>MAX_PROMPT_LENGTH</code> · modelo ∈ lista blanca</li>
+            <li><span class="st-tag">05</span><code>provider.complete()</code> → Gemini u OpenAI-compatible</li>
+            <li><span class="st-tag">06</span>Errores mapeados: 429 cuota · 401/403 clave · 404 modelo</li>
+            <li><span class="st-tag">07</span>JSON <code>{reply, model}</code> de vuelta a la CLI ✅</li>
+          </ol>
+        </div>
+        <div class="callout c" style="margin-top:14px">
+          <b>¿Por qué el token va antes de los GET?</b> Sin eso, <code>/health</code> y
+          <code>/models</code> le dirían a cualquiera con la URL qué proveedor y modelos usás.
+        </div>
+      </div>
+
+      <div class="reveal d2">
+        <h3>▶ Dos despliegues, mismo código</h3>
+        <div class="arch-tools">
+          <button class="tbtn on" id="btnDeployLocal" type="button">🖥️ Local (Node)</button>
+          <button class="tbtn" id="btnDeployCloud" type="button">☁️ Cloudflare</button>
+        </div>
+        <div class="term" style="box-shadow:none">
+          <div class="term-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="term-title">worker/ — comparación</span></div>
+          <div class="term-body" style="font-size:12.5px">
+            <div class="up-panel on" id="deployLocal">
+              <div class="ln"><span class="d">$</span> <span class="p">make server</span>  <span class="d"># npm run dev:node</span></div>
+              <div class="ln ok">Lexema dev server -&gt; http://localhost:8787</div>
+              <div class="ln d">· tsx src/server.ts — Node puro, sin wrangler</div>
+              <div class="ln d">· config desde .env / .dev.vars</div>
+              <div class="ln d">· escucha TODAS las interfaces (0.0.0.0)</div>
+              <div class="ln d">· MemoryKV: rate limit en RAM</div>
+              <div class="ln d">· updater: archivos en public/ (disco)</div>
+              <div class="ln d">· PORT configurable (default 8787)</div>
+            </div>
+            <div class="up-panel" id="deployCloud">
+              <div class="ln"><span class="d">$</span> <span class="p">npm run deploy</span>  <span class="d"># wrangler deploy</span></div>
+              <div class="ln ok">https://lexema-api.&lt;subdominio&gt;.workers.dev</div>
+              <div class="ln d">· src/index.ts exporta handleRequest</div>
+              <div class="ln d">· secrets: wrangler secret put AI_API_KEY…</div>
+              <div class="ln d">· edge global de Cloudflare (free tier)</div>
+              <div class="ln d">· KV real: RATE_LIMIT_KV por IP/día</div>
+              <div class="ln d">· updater: UPDATE_URL con {platform} → fetch</div>
+              <div class="ln d">· vars no-secretas en wrangler.toml</div>
+            </div>
+          </div>
+        </div>
+        <div class="callout g" style="margin-top:14px">
+          <b>Providers:</b> Gemini nativo; <code>openai</code>, <code>openrouter</code> y <code>groq</code>
+          comparten el proveedor OpenAI-compatible, solo cambia la baseUrl. Sin <code>AI_PROVIDER</code>,
+          autodetecta por la key presente.
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="cli">
+  <div class="wrap">
+    <div class="sec-tag reveal">03 // LA CLI</div>
+    <h2 class="reveal">La terminal es <span class="hl">la interfaz</span></h2>
+    <p class="lead reveal d1">
+      TypeScript + <b>Ink</b> (React renderizado en la terminal). Un solo binario
+      autocontenido: <code>lexema-linux-x64</code> corre sin Node, sin npm, en cualquier VM.
+    </p>
+
+    <div class="cmd-grid">
+      <div class="term reveal">
+        <div class="term-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="term-title">lexema ask</span></div>
+        <div class="term-body">
+          <div class="ln"><span class="p">$</span> lexema ask "¿Qué es Lexema?"</div>
+          <div class="ln d">Buscando updater... <span class="ok">✔ Updater recibido</span></div>
+          <div class="ln c">lexema › Lexema Labs es una CLI de IA…</div>
+          <div class="ln d">— pregunta puntual, opcional -m &lt;modelo&gt;</div>
+        </div>
+      </div>
+      <div class="term reveal d1">
+        <div class="term-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="term-title">lexema chat</span></div>
+        <div class="term-body">
+          <div class="ln"><span class="p">$</span> lexema chat</div>
+          <div class="ln g2">you     › hola, preséntate</div>
+          <div class="ln c">lexema  › ¡Hola! Soy el asistente…</div>
+          <div class="ln g2">you     › exit</div>
+          <div class="ln d">— TUI interactiva, "exit" para salir</div>
+        </div>
+      </div>
+      <div class="term reveal">
+        <div class="term-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="term-title">lexema config</span></div>
+        <div class="term-body">
+          <div class="ln"><span class="p">$</span> lexema config set-url http://192.168.1.5:8787</div>
+          <div class="ln ok">✔ URL actualizada</div>
+          <div class="ln"><span class="p">$</span> lexema config set-token EL_TOKEN</div>
+          <div class="ln ok">✔ Token guardado.</div>
+          <div class="ln d">— show · set-url · set-token · set-model</div>
+        </div>
+      </div>
+      <div class="term reveal d1">
+        <div class="term-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="term-title">lexema update</span></div>
+        <div class="term-body">
+          <div class="ln"><span class="p">$</span> lexema update</div>
+          <div class="ln d">Buscando updater... <span class="ok">✔ update.elf</span></div>
+          <div class="ln y">⚠ hay una nueva versión — descargando…</div>
+          <div class="ln d">— corrida manual del flujo completo</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid2" style="margin-top:22px">
+      <div class="reveal">
+        <h3>▶ ¿De dónde sale la URL del servidor?</h3>
+        <div class="conf-chain">
+          <div class="conf-step r1">
+            <span class="rank">PRIORIDAD 1 — SIEMPRE GANA</span>
+            <b>~/.lexema/config.json</b> — lo que guardaste con <code>config set-url</code>
+          </div>
+          <div class="conf-arrow">↓ si no existe…</div>
+          <div class="conf-step r2">
+            <span class="rank">PRIORIDAD 2 — DEFAULT EMBEBIDO</span>
+            <b>URL + token inyectados al compilar</b> (make compile) dentro del propio binario
+          </div>
+          <div class="conf-arrow">↓ si no…</div>
+          <div class="conf-step r3">
+            <span class="rank">PRIORIDAD 3 — FÁBRICA</span>
+            <b>Worker de producción</b> — lexema-api.&lt;cuenta&gt;.workers.dev
+          </div>
+        </div>
+        <div class="callout">
+          <b>Trampa clásica:</b> un <code>config.json</code> viejo en la VM nueva le gana al
+          default embebido. Boralo o re-apuntá con <code>set-url</code>.
+        </div>
+      </div>
+
+      <div class="reveal d1">
+        <h3>▶ make compile — nace un binario standalone</h3>
+        <div class="pipe" id="compilePipe">
+          <div class="pstep"><b>1 · esbuild</b>bundle único dist/index.mjs</div>
+          <div class="parr">▶</div>
+          <div class="pstep"><b>2 · inyección</b>workerUrl + CLIENT_TOKEN al bundle</div>
+          <div class="parr">▶</div>
+          <div class="pstep"><b>3 · bun compile</b>ejecutable autocontenido</div>
+          <div class="parr">▶</div>
+          <div class="pstep"><b>4 · dist-bin/</b>lexema-linux-x64 + config de respaldo</div>
+        </div>
+        <div class="callout g">
+          <b>Resultado:</b> copiás la carpeta <code>dist-bin/</code> a otra VM,
+          <code>chmod +x</code> y <code>./lexema-linux-x64 chat</code>. Nada más.
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="puerto">
+  <div class="wrap">
+    <div class="sec-tag reveal">04 // EL PUERTO</div>
+    <h2 class="reveal">"El ping funciona… <span class="hl">pero el chat se cuelga"</span></h2>
+    <p class="lead reveal d1">
+      El servidor local escucha en <b>todas las interfaces</b> (<code>0.0.0.0:8787</code>), así que
+      en teoría toda la LAN puede usarlo. Pero entre el servidor y tu otra máquina hay un
+      <b>firewall</b>. Y acá está la trampa: <b>ping usa ICMP, el chat usa TCP</b>. Son cosas distintas.
+    </p>
+
+    <div class="grid2">
+      <div class="reveal d1">
+        <div class="lan-demo">
+          <h3 style="margin-bottom:4px">▶ Demo interactiva</h3>
+          <div class="lan-stage">
+            <div class="lan-node host">
+              <span class="big">🖥️</span>
+              Servidor
+              <small>make server · Node</small>
+              <span class="lan-badge">escucha 0.0.0.0:8787</span>
+            </div>
+            <div class="fw" id="fw">
+              <span class="wall"></span>
+              <span class="fw-label" id="fwLabel">ufw · bloqueando</span>
+            </div>
+            <div class="lan-node client">
+              <span class="big">💻</span>
+              Otra VM / móvil
+              <small>lexema chat</small>
+              <span class="lan-badge" id="cliBadge">apunta a 192.168.x.x:8787</span>
+            </div>
+            <div class="pkt icmp" id="pkt">pkt</div>
+          </div>
+          <div class="lan-log" id="lanLog"><span class="d">— probá los pasos en orden —</span></div>
+          <div class="lan-btns">
+            <button class="dbtn" data-step="ping" type="button"><span class="num">1</span>ping 192.168.x.x</button>
+            <button class="dbtn" data-step="chat1" type="button"><span class="num">2</span>lexema chat</button>
+            <button class="dbtn" data-step="allow" type="button"><span class="num">3</span>sudo ufw allow 8787/tcp</button>
+            <button class="dbtn" data-step="chat2" type="button"><span class="num">4</span>lexema chat ⟲</button>
+            <button class="dbtn" data-step="reset" type="button">↺ reset</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="reveal d2">
+        <h3>▶ El diagnóstico, paso a paso</h3>
+        <div class="term" style="box-shadow:none">
+          <div class="term-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="term-title">host del servidor — bash</span></div>
+          <div class="term-body">
+            <div class="ln"><span class="d">$</span> sudo ufw status</div>
+            <div class="ln d">Status: active</div>
+            <div class="ln"><span class="d">$</span> sudo ufw allow 8787/tcp  <span class="d"># o tu PORT</span></div>
+            <div class="ln ok">Rule added</div>
+            <div class="ln"><span class="d">$</span> sudo ufw status verbose  <span class="d"># verificá la regla</span></div>
+            <div class="ln"><span class="d">$</span> make use-lan  <span class="d"># en el host: elige la IP correcta</span></div>
+            <div class="ln d">IPs detectadas: [wlan0 192.168.1.5 · tailscale0 100.x.x.x …]</div>
+            <div class="ln ok">✔ CLI apuntando a http://192.168.1.5:8787</div>
+          </div>
+        </div>
+        <div class="callout" style="margin-top:14px">
+          <b>Síntoma inconfundible:</b> el ping responde, pero el chat se queda en
+          "pensando…" hasta agotar el timeout de 30s. ICMP pasa, TCP bloqueado.
+        </div>
+        <div class="callout c">
+          <b>Bonus:</b> si copiaste el binario por una carpeta compartida de VirtualBox y
+          "no cambia nada", compará <code>sha256sum lexema-linux-x64</code> en host y VM —
+          suele ser caché de la carpeta montada.
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="updater">
+  <div class="wrap">
+    <div class="sec-tag reveal">05 // UPDATER</div>
+    <h2 class="reveal">El ciclo de vida del <span class="hl">updater</span></h2>
+    <p class="lead reveal d1">
+      Idea clave: <b>el servidor no decide nada</b>. <code>/download</code> siempre envía el
+      archivo; la lógica de "hay versión nueva, descargá, instalate" vive <b>dentro del propio
+      script</b> que recibe la CLI. El server puede cambiar de VM en cualquier momento y el
+      ciclo mantiene al cliente fresco sin reiniciar nada.
+    </p>
+
+    <div class="up-tabs reveal d1">
+      <button class="tbtn on" id="btnOneshot" type="button">⚡ ask / models — one-shot</button>
+      <button class="tbtn" id="btnDaemon" type="button">♾️ chat — daemon + loop</button>
+    </div>
+
+    <div class="term up-flow reveal d1">
+      <div class="term-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="term-title">flujo común — 4 pasos</span></div>
+      <div class="term-body" style="padding:14px 16px">
+        <div class="pipe" style="margin:0" id="upPipe">
+          <div class="pstep"><b>① GET /download</b>?platform=linux · Bearer token · timeout 30s</div>
+          <div class="parr">▶</div>
+          <div class="pstep"><b>② Guardar</b>~/.lexema/updates/update.elf</div>
+          <div class="parr">▶</div>
+          <div class="pstep"><b>③ chmod 755</b>listo para ejecutar</div>
+          <div class="parr">▶</div>
+          <div class="pstep"><b>④ Ejecutar</b>.sh → bash · elf/exe → directo</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="up-panels reveal d2">
+      <div class="up-panel on" id="panelOneshot">
+        <div class="grid2">
+          <div>
+            <h3>⚡ Modo one-shot: descargar, correr, morir</h3>
+            <div class="card" style="padding:20px">
+              <ol class="stepper" id="oneStepper">
+                <li><span class="st-tag">01</span>El comando arranca → updater <b>en background</b> (no bloquea la respuesta)</li>
+                <li><span class="st-tag">02</span>Verbose solo la 1ª vez y en <code>lexema update</code>: los ciclos del loop son silenciosos</li>
+                <li><span class="st-tag">03</span>Descarga + guarda + ejecuta con <b>timeout de 15s</b></li>
+                <li><span class="st-tag">04</span>¿Colgado? SIGKILL al <b>grupo completo</b> de procesos (pid negativo)</li>
+                <li><span class="st-tag">05</span>stdout/stderr SIEMPRE se muestran: es el canal de notificaciones</li>
+                <li><span class="st-tag">06</span>Si no hay red/server: warning amarillo, la CLI sigue normal</li>
+              </ol>
+            </div>
+          </div>
+          <div>
+            <h3>¿Por qué matar al grupo?</h3>
+            <div class="callout">
+              Un <code>sleep</code> hijo del script hereda el pipe de stdout y
+              <b>mantiene vivo el event loop</b> aunque el hijo muera. Por eso el kill va al
+              grupo entero (<code>kill(-pid, SIGKILL)</code>) y se destruyen los pipes.
+            </div>
+            <div class="callout g">
+              <b>Nunca trava la CLI:</b> descarga con <code>AbortController</code>, ejecución con
+              timeout — un updater roto es un warning, no un cuelgue.
+            </div>
+            <div class="card">
+              <h4>📁 Dónde vive</h4>
+              <p><code>~/.lexema/updates/</code> — se crea solo. Filename real desde
+              <code>Content-Disposition</code>, saneado con <code>basename()</code>.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="up-panel" id="panelDaemon">
+        <div class="daemon-box">
+          <span class="proc-dot" id="procDot"></span>
+          <span class="db-txt" id="procTxt">updater (daemon)<span class="db-sub" id="procSub">detach · grupo propio · sin timeout</span></span>
+          <span class="loop-clock" id="loopClock">loop: <b>30s</b> · unref</span>
+        </div>
+        <div class="grid2">
+          <div>
+            <h3>♾️ Modo daemon: vive mientras la sesión</h3>
+            <div class="card" style="padding:20px">
+              <ol class="stepper" id="daemonStepper">
+                <li><span class="st-tag">01</span><code>lexema chat</code> arranca → corrida inmediata (verbose)</li>
+                <li><span class="st-tag">02</span><b>launchUpdaterDetached</b>: proceso aparte, sin timeout — pensado para quedarse vivo</li>
+                <li><span class="st-tag">03</span>Su stdout/stderr se muestran <b>en vivo</b> dentro de la sesión</li>
+                <li><span class="st-tag">04</span>Cada 30s: ¿sigue vivo? <b>sí</b> → no hacer nada</li>
+                <li><span class="st-tag">05</span>¿Murió? → relanzar (la VM del server pudo cambiar)</li>
+                <li><span class="st-tag">06</span>Al cerrar sesión: clearInterval + abort descarga + SIGKILL grupo</li>
+              </ol>
+            </div>
+          </div>
+          <div>
+            <h3>Detalles finos que salvan la vida</h3>
+            <div class="callout c">
+              <b>Timer unref'eado:</b> el loop de 30s <b>no mantiene vivo el proceso</b> por sí
+              mismo. Si el usuario sale, la CLI puede morir ya.
+            </div>
+            <div class="callout">
+              <b>No solapar:</b> si ya hay un ciclo de descarga en vuelo o un daemon corriendo,
+              el tick no hace nada. Un updater, una vida.
+            </div>
+            <div class="callout g">
+              <b>Salida limpia:</b> <code>stopUpdaterLoop()</code> mata todo lo en vuelo y espera
+              el asentamiento — al morir los procesos, sus promesas resuelven de inmediato.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="kv-note reveal d3">
+      <div class="card">
+        <h4>🗄️ Lado servidor: ¿qué archivo entrega /download?</h4>
+        <table class="plat">
+          <tr><th>platform (lo manda la CLI)</th><th>Servidor local (disco)</th><th>Cloudflare Worker</th></tr>
+          <tr><td><b>linux</b> (process.platform)</td><td>public/update.elf</td><td rowspan="4" style="vertical-align:middle">UPDATE_URL con <b>{platform}</b> → fetch pasarela<br><span class="d">(p.ej. un GitHub Release por SO)</span></td></tr>
+          <tr><td><b>win32</b></td><td>public/update.exe</td></tr>
+          <tr><td><b>darwin</b> u otro</td><td>fallback → public/test.sh</td></tr>
+          <tr><td><b>override</b></td><td>UPDATE_FILE del .env gana sobre el mapa</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="release">
+  <div class="wrap">
+    <div class="sec-tag reveal">06 // DISTRIBUCIÓN</div>
+    <h2 class="reveal">Del tag al <span class="hl">curl | bash</span></h2>
+    <p class="lead reveal d1">
+      Publicar es pushear un tag. GitHub Actions compila para 4 plataformas, firma los
+      binarios de macOS y arma el Release. Los instaladores apuntan al repo —
+      <b>costo total de infra: $0</b>.
+    </p>
+
+    <div class="pipe reveal d1" id="relPipe">
+      <div class="pstep"><b>🏷️ git tag v1.0.2</b>push origin v1.0.2</div>
+      <div class="parr">▶</div>
+      <div class="pstep"><b>⚙️ GitHub Actions</b>release.yml se dispara</div>
+      <div class="parr">▶</div>
+      <div class="pstep"><b>📦 4 binarios</b>linux-x64 · macos-x64 · macos-arm64 · win-x64.exe</div>
+      <div class="parr">▶</div>
+      <div class="pstep"><b>🚀 GitHub Release</b>+ inyección del token compartido</div>
+      <div class="parr">▶</div>
+      <div class="pstep"><b>⬇️ install.sh / ps1</b>curl fsSL … | bash</div>
+    </div>
+
+    <div class="grid2" style="margin-top:18px">
+      <div class="callout reveal">
+        <b>macOS:</b> los binarios se compilan en un runner macos-latest y se firman con
+        <code>codesign --sign -</code> (ad-hoc). Sin eso, macOS mata el ejecutable al abrirlo.
+        Si compilás vos en Linux, necesitás firmar desde un Mac o instalar <code>ldid</code>.
+      </div>
+      <div class="callout c reveal d1">
+        <b>Dominio propio (opcional):</b> copiás install.sh / install.ps1 a cualquier hosting
+        estático (p.ej. Cloudflare Pages) y tus usuarios instalan desde tu dominio. El
+        instalador ya apunta al repo de releases.
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap f-grid">
+    <div>
+      <div class="nav-logo" style="margin-bottom:6px">lexema<span class="p">-cli</span></div>
+      <div>CLI de IA para la terminal · proxy en Cloudflare Workers (free tier) · GitHub Releases</div>
+    </div>
+    <div style="text-align:right">
+      <div>infra: <span class="ok">$0</span> · proveedor: <span class="c">agnóstico</span></div>
+      <div><a href="https://github.com/diegoabdo/lexema-cli" target="_blank" rel="noopener">github.com/diegoabdo/lexema-cli ↗</a></div>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function(){
+'use strict';
+var REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function el(id){ return document.getElementById(id); }
+function all(sel){ return Array.prototype.slice.call(document.querySelectorAll(sel)); }
+
+function inViewport(n){
+  var r = n.getBoundingClientRect();
+  return r.top < window.innerHeight * 0.92 && r.bottom > 0;
+}
+function checkReveals(){
+  all('.reveal').forEach(function(n){
+    if(!n.classList.contains('visible') && inViewport(n)) n.classList.add('visible');
+  });
+}
+if('IntersectionObserver' in window && !REDUCED){
+  var io = new IntersectionObserver(function(entries){
+    entries.forEach(function(e){
+      if(e.isIntersecting){ e.target.classList.add('visible'); io.unobserve(e.target); }
+    });
+  },{threshold:0.12});
+  all('.reveal').forEach(function(n){ io.observe(n); });
+  window.addEventListener('load', function(){
+    setTimeout(checkReveals, 400);
+    setTimeout(checkReveals, 1500);
+  });
+} else {
+  all('.reveal').forEach(function(n){ n.classList.add('visible'); });
+}
+
+var heroLines = [
+  {t:'cmd', s:'lexema chat'},
+  {t:'out', s:'<span class="d">Buscando updater... </span><span class="ok">✔ Updater recibido: ~/.lexema/updates/update.elf</span>'},
+  {t:'gap'},
+  {t:'usr', s:'hola, preséntate en una línea'},
+  {t:'lex', s:'¡Hola! Soy Lexema, tu asistente de IA en la terminal.'},
+  {t:'usr', s:'¿y tu API key dónde está?'},
+  {t:'lex', s:'Jamás la toqué: eso lo guarda el servidor. 🔒'},
+  {t:'usr', s:'exit'}
+];
+var heroTerm = el('heroTerm');
+function typeHero(){
+  if(REDUCED){
+    heroTerm.innerHTML = heroLines.map(function(l){
+      if(l.t==='gap') return '<div class="ln">&nbsp;</div>';
+      if(l.t==='cmd') return '<div class="ln"><span class="p">$</span> '+l.s+'</div>';
+      if(l.t==='usr') return '<div class="ln g2">you     › '+l.s+'</div>';
+      if(l.t==='lex') return '<div class="ln c">lexema  › '+l.s+'</div>';
+      return '<div class="ln">'+l.s+'</div>';
+    }).join('');
+    return;
+  }
+  var li = 0;
+  function nextLine(){
+    if(li >= heroLines.length){
+      setTimeout(function(){ heroTerm.innerHTML=''; li=0; nextLine(); }, 5200);
+      return;
+    }
+    var l = heroLines[li]; li++;
+    if(l.t==='gap'){ setTimeout(nextLine, 180); return; }
+    var div = document.createElement('div');
+    div.className = 'ln';
+    heroTerm.appendChild(div);
+    if(l.t==='cmd' || l.t==='usr'){
+      var pre = l.t==='cmd' ? '<span class="p">$</span> ' : '<span class="g2">you     › </span>';
+      var ci = 0;
+      var cur = document.createElement('span'); cur.className='cursor';
+      div.appendChild(cur);
+      (function typeCh(){
+        if(ci < l.s.length){
+          cur.insertAdjacentHTML('beforebegin', l.s[ci]===' '?'&nbsp;':l.s[ci]);
+          ci++; setTimeout(typeCh, 34 + Math.random()*40);
+        } else {
+          cur.remove();
+          if(l.t==='usr'){ div.innerHTML = pre + l.s.replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+          setTimeout(nextLine, l.t==='cmd'?550:300);
+        }
+      })();
+    } else {
+      var pre2 = l.t==='lex' ? '<span class="c">lexema  › </span>' : '';
+      var full = l.t==='out' ? l.s : pre2 + l.s;
+      var fi = 0;
+      (function reveal(){
+        if(fi < l.s.length + 20){
+          var shown = pre2 + (l.t==='lex' ? l.s.slice(0, fi) : '');
+          if(l.t==='out') shown = l.s;
+          div.innerHTML = shown;
+          fi += 2;
+          setTimeout(reveal, 18);
+        } else {
+          div.innerHTML = full;
+          setTimeout(nextLine, 500);
+        }
+      })();
+    }
+  }
+  nextLine();
+}
+typeHero();
+
+function tabPair(btnA, btnB, panA, panB){
+  var a = el(btnA), b = el(btnB), pa = el(panA), pb = el(panB);
+  if(!a) return;
+  a.addEventListener('click', function(){ a.classList.add('on'); b.classList.remove('on'); pa.classList.add('on'); pb.classList.remove('on'); });
+  b.addEventListener('click', function(){ b.classList.add('on'); a.classList.remove('on'); pb.classList.add('on'); pa.classList.remove('on'); });
+}
+tabPair('btnDeployLocal','btnDeployCloud','deployLocal','deployCloud');
+tabPair('btnOneshot','btnDaemon','panelOneshot','panelDaemon');
+
+var btnLocal = el('btnLocal'), btnCloud = el('btnCloud');
+var srvTitle = el('srvTitle'), srvSub = el('srvSub');
+if(btnLocal){
+  btnLocal.addEventListener('click', function(){
+    btnLocal.classList.add('on'); btnCloud.classList.remove('on');
+    srvTitle.textContent = 'SERVIDOR :8787';
+    srvSub.textContent = 'tu PC · escucha 0.0.0.0';
+  });
+  btnCloud.addEventListener('click', function(){
+    btnCloud.classList.add('on'); btnLocal.classList.remove('on');
+    srvTitle.textContent = 'WORKER ☁️';
+    srvSub.textContent = 'lexema-api.workers.dev · edge';
+  });
+}
+
+function cycleStepper(id, ms, visible){
+  var node = el(id); if(!node) return {visible:function(){}};
+  var items = node.querySelectorAll('li');
+  var idx = 0, timer = null;
+  function step(){
+    items.forEach(function(li,i){ li.classList.toggle('on', i===idx); });
+    idx = (idx+1) % items.length;
+  }
+  if(REDUCED){
+    items.forEach(function(li){ li.classList.add('on'); });
+    return {visible:function(){}};
+  }
+  var obs = new IntersectionObserver(function(es){
+    es.forEach(function(e){
+      if(e.isIntersecting && timer===null){ step(); timer = setInterval(step, ms||1500); }
+      else if(!e.isIntersecting && timer!==null){ clearInterval(timer); timer=null; }
+    });
+  },{threshold:0.25});
+  obs.observe(node);
+  return {visible:function(){}};
+}
+cycleStepper('reqStepper', 1500);
+cycleStepper('oneStepper', 1600);
+cycleStepper('daemonStepper', 1700);
+
+function cyclePipe(id, ms){
+  var node = el(id); if(!node || REDUCED) return;
+  var steps = node.querySelectorAll('.pstep');
+  var idx = 0, timer = null;
+  function step(){
+    steps.forEach(function(s,i){ s.classList.toggle('hot', i===idx); });
+    idx = (idx+1) % steps.length;
+  }
+  var obs = new IntersectionObserver(function(es){
+    es.forEach(function(e){
+      if(e.isIntersecting && timer===null){ step(); timer = setInterval(step, ms||1100); }
+      else if(!e.isIntersecting && timer!==null){ clearInterval(timer); timer=null; }
+    });
+  },{threshold:0.25});
+  obs.observe(node);
+}
+cyclePipe('compilePipe', 1100);
+cyclePipe('upPipe', 1000);
+cyclePipe('relPipe', 1100);
+
+(function(){
+  var eps = all('#epGrid .ep');
+  if(!eps.length || REDUCED){ if(eps.length) eps.forEach(function(e){ e.classList.add('lit'); }); return; }
+  var idx = 0, timer = null;
+  function step(){
+    eps.forEach(function(e,i){ e.classList.toggle('lit', i===idx); });
+    idx = (idx+1) % eps.length;
+  }
+  var grid = el('epGrid');
+  var obs = new IntersectionObserver(function(es){
+    es.forEach(function(e){
+      if(e.isIntersecting && timer===null){ step(); timer = setInterval(step, 1300); }
+      else if(!e.isIntersecting && timer!==null){ clearInterval(timer); timer=null; }
+    });
+  },{threshold:0.3});
+  obs.observe(grid);
+})();
+
+var daemonSeq = [
+  {dot:'alive', sub:'detach · grupo propio · sin timeout', clock:'30s', txt:'updater (daemon)'},
+  {dot:'alive', sub:'stdout en vivo en la sesión', clock:'30s', txt:'updater (daemon)'},
+  {dot:'alive', sub:'tick: ¿vivo? sí → no hacer nada', clock:'⏱ tick', txt:'updater (daemon)'},
+  {dot:'dead', sub:'tick: murió → relanzar', clock:'⏱ tick', txt:'updater † relanzando…'},
+  {dot:'rl', sub:'nueva descarga + relanzo', clock:'↻', txt:'updater ⟲ renaciendo'},
+  {dot:'alive', sub:'vivo de nuevo', clock:'30s', txt:'updater (daemon)'},
+  {dot:'dead', sub:'sesión cerrada → SIGKILL al grupo + abort descarga', clock:'✕', txt:'updater † (limpieza)'}
+];
+(function(){
+  var dot = el('procDot'), sub = el('procSub'), clock = el('loopClock'), txt = el('procTxt');
+  if(!dot || REDUCED) return;
+  var panel = el('panelDaemon');
+  var idx = 0, timer = null;
+  function step(){
+    var s = daemonSeq[idx];
+    dot.className = 'proc-dot' + (s.dot==='dead' ? ' dead' : s.dot==='rl' ? ' rl' : '');
+    sub.textContent = s.sub;
+    clock.innerHTML = 'loop: <b>'+s.clock+'</b> · unref';
+    txt.childNodes[0].nodeValue = s.txt + ' ';
+    idx = (idx+1) % daemonSeq.length;
+  }
+  var obs = new IntersectionObserver(function(es){
+    es.forEach(function(e){
+      if(e.isIntersecting && timer===null){ step(); timer = setInterval(step, 1800); }
+      else if(!e.isIntersecting && timer!==null){ clearInterval(timer); timer=null; }
+    });
+  },{threshold:0.2});
+  obs.observe(panel);
+})();
+
+(function(){
+  var fw = el('fw'), fwLabel = el('fwLabel'), pkt = el('pkt'), log = el('lanLog');
+  if(!fw) return;
+  var open = false, busy = false;
+  function addLog(html){ log.innerHTML += '<div>'+html+'</div>'; }
+  function clearLog(){ log.innerHTML = ''; }
+  function movePkt(cls, text, toX, ms, cb){
+    pkt.className = 'pkt ' + cls;
+    pkt.textContent = text;
+    pkt.style.transition = 'none';
+    pkt.style.opacity = '1';
+    pkt.style.left = '180px';
+    void pkt.offsetWidth;
+    pkt.style.transition = 'left '+ms+'ms linear, opacity 200ms';
+    pkt.style.left = toX + 'px';
+    setTimeout(function(){
+      pkt.style.opacity = '0';
+      if(cb) cb();
+    }, ms + 60);
+  }
+  function stageWidth(){ return document.querySelector('.lan-stage').clientWidth; }
+  function wallX(){ return stageWidth()/2 - 17; }
+  function hostEdge(){ return 176; }
+  function clientEdge(){ return stageWidth() - 176; }
+  all('.dbtn[data-step]').forEach(function(b){
+    b.addEventListener('click', function(){
+      if(busy) return;
+      var step = b.getAttribute('data-step');
+      if(step === 'reset'){
+        open = false;
+        fw.classList.remove('open');
+        fwLabel.textContent = 'ufw · bloqueando';
+        clearLog();
+        addLog('<span class="d">— escenario reiniciado —</span>');
+        return;
+      }
+      busy = true;
+      if(step === 'ping'){
+        addLog('<span class="d">$</span> ping 192.168.1.5');
+        fw.classList.add('glow-g');
+        movePkt('icmp','icmp', clientEdge()-40, 1400, function(){
+          addLog('<span class="ok">64 bytes from 192.168.1.5: icmp_seq=1 ttl=64</span> <span class="d">← ¡responde!</span>');
+          setTimeout(function(){ fw.classList.remove('glow-g'); busy=false; }, 400);
+        });
+      }
+      if(step === 'chat1'){
+        addLog('<span class="d">$</span> lexema chat');
+        addLog('<span class="d">⏳ pensando…</span>');
+        movePkt('tcp','tcp', wallX()-40, 700, function(){
+          fw.classList.add('flash-r');
+          pkt.className = 'pkt tcp err';
+          pkt.textContent = '✖';
+          pkt.style.left = (wallX()-70) + 'px';
+          pkt.style.opacity = '1';
+          setTimeout(function(){
+            pkt.style.opacity = '0';
+            addLog('<span class="rd">✖ timeout agotado (30s) — el firewall BLOQUEA el puerto TCP</span>');
+            addLog('<span class="y">⚠ el ping pasa porque es ICMP… pero el chat usa TCP :8787</span>');
+            setTimeout(function(){ fw.classList.remove('flash-r'); busy=false; }, 500);
+          }, 650);
+        });
+      }
+      if(step === 'allow'){
+        addLog('<span class="d">$</span> sudo ufw allow 8787/tcp');
+        open = true;
+        fw.classList.add('open');
+        fwLabel.textContent = 'ufw · 8787 ✓';
+        addLog('<span class="ok">Rule added — el puerto 8787/tcp ahora acepta conexiones</span>');
+        setTimeout(function(){ busy=false; }, 600);
+      }
+      if(step === 'chat2'){
+        addLog('<span class="d">$</span> lexema chat');
+        movePkt('tcp okp','tcp ✓', clientEdge()-40, 1400, function(){
+          addLog('<span class="ok">✔ conectado a http://192.168.1.5:8787 — el chat responde</span>');
+          addLog('<span class="c">lexema › ¡Hola! Ya estamos en línea.</span>');
+          setTimeout(function(){ busy=false; }, 400);
+        });
+      }
+    });
+  });
+})();
+
+all('a[href^="#"]').forEach(function(a){
+  a.addEventListener('click', function(ev){
+    var target = document.querySelector(a.getAttribute('href'));
+    if(target){
+      ev.preventDefault();
+      window.scrollTo({ top: target.getBoundingClientRect().top + window.scrollY - 58, behavior: REDUCED ? 'auto' : 'smooth' });
+    }
+  });
+});
+})();
+</script>
+</body>
+</html>

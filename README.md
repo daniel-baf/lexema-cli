@@ -64,6 +64,57 @@ Detecta las IPs de red de tu PC (LAN, Tailscale, etc.), te deja elegir cuál
 usar y configura la CLI automáticamente (URL + token, si hay `CLIENT_TOKEN`
 en `worker/.env`).
 
+> **Firewall del host**: hacer `ping` a la IP no confirma que el puerto del
+> servidor esté abierto — ICMP y TCP son cosas distintas, y un firewall que
+> deja pasar el ping puede seguir bloqueando el puerto. Si desde otra
+> máquina/VM el chat se queda colgado en "pensando..." hasta agotar el
+> tiempo de espera (pero el `ping` sí responde), es casi siempre esto. En
+> Linux con `ufw` activo (`sudo ufw status`), abrí el puerto del servidor:
+> ```bash
+> sudo ufw allow 8787/tcp     # o el puerto que hayas puesto en PORT/.env
+> ```
+> Verificá con `sudo ufw status verbose` que la regla quedó activa, y
+> probá de nuevo desde la otra máquina.
+
+### Compilar un binario standalone para otra máquina (`make compile`)
+
+Para probar la CLI en otra VM/PC sin Node ni npm instalados, generá un
+binario único con la URL del servidor ya embebida:
+
+```bash
+make compile
+```
+
+Te pregunta si querés configurar la URL para este build (si decís que no,
+el binario queda con la URL de producción por defecto). Si decís que sí:
+
+- Te propone la IP de red detectada de tu PC (o la que vos escribas) y el
+  puerto (`PORT` del `.env`, o `8787`).
+- Lee `CLIENT_TOKEN` de `worker/.env` si existe.
+- Genera `cli/dist-bin/lexema-linux-x64` con esa URL/token **ya embebidos
+  como default** dentro del propio binario (igual que el workflow de
+  releases inyecta el token compartido) — no hace falta copiar ningún
+  archivo de configuración aparte para que funcione.
+
+En la otra máquina, **solo copiás la carpeta `cli/dist-bin/` completa**
+(incluye un `config.json` de respaldo, por si querés reapuntar el mismo
+binario a otro servidor sin recompilar) y corrés:
+
+```bash
+chmod +x lexema-linux-x64
+./lexema-linux-x64 chat
+```
+
+Si esa otra máquina no ve la URL/puerto que acabás de configurar, revisá:
+
+- Que no tenga ya un `~/.lexema/config.json` viejo (un `config set-url`
+  anterior siempre gana sobre el default embebido en el binario).
+- Si la copiaste vía una carpeta compartida de VirtualBox, que el archivo
+  no haya quedado en caché: compará `sha256sum lexema-linux-x64` en el
+  host y en la VM; si difieren, remontá la carpeta compartida
+  (`sudo umount` + `sudo mount -t vboxsf ...`) o reiniciá la VM.
+- El firewall del host (ver el aviso de arriba).
+
 ### Configuración vía `.env`
 
 Copia `worker/.env.example` → `worker/.env` y edita lo que necesites.
@@ -247,6 +298,8 @@ La configuración se guarda en `~/.lexema/config.json`.
 | `make env` | Crea `worker/.env` desde `.env.example` |
 | `make up` | Levanta el servidor local + chat; al salir detiene todo |
 | `make server` | Solo el servidor local (`:8787`) |
+| `make use-lan` | Detecta IPs de red y apunta la CLI a una de ellas (probar desde otro dispositivo) |
+| `make compile` | Genera `cli/dist-bin/lexema-linux-x64`, binario standalone con URL/token embebidos |
 | `make test` | Tipos + smoke test + demo (mocks, sin claves reales) |
 | `make ask P="..."` / `make chat` / `make models` | Atajos de la CLI |
 | `make typecheck` / `make build` / `make clean` | Tipos, compilar, limpiar |
