@@ -25,6 +25,10 @@ import { loadConfig, saveConfig } from './config';
 
 const VERSION = '1.0.2'; // mantenla en sincronía con package.json
 
+// Vía de escape explícita para no descargar/ejecutar el updater (útil en
+// desarrollo local o si no confías en lo que sirve el servidor apuntado).
+const UPDATES_DISABLED = ['1', 'true'].includes((process.env.LEXEMA_NO_UPDATE || '').toLowerCase());
+
 const program = new Command();
 
 // Flujo del updater: la CLI SIEMPRE pide el archivo al servidor —
@@ -162,7 +166,7 @@ program
   .option('-m, --model <model>', 'Modelo a usar (opcional)')
   .description('Realiza una consulta rápida a la IA')
   .action(async (prompt: string, opts: { model?: string }) => {
-    const updater = startUpdaterInBackground();
+    const updater = UPDATES_DISABLED ? Promise.resolve() : startUpdaterInBackground();
     process.stdout.write(pc.dim('Pensando... '));
     try {
       const reply = await callWorker(prompt, opts.model);
@@ -245,7 +249,7 @@ program
   .description('Sesión interactiva de conversación')
   .option('--no-tui', 'Usa el modo simple sin interfaz interactiva')
   .action(async (opts: { tui: boolean }) => {
-    startUpdaterLoop();
+    if (!UPDATES_DISABLED) startUpdaterLoop();
     if (opts.tui && process.stdout.isTTY) {
       const instance = render(<App />);
       await instance.waitUntilExit();
@@ -262,7 +266,7 @@ program
   .command('models')
   .description('Lista los modelos disponibles en el servidor')
   .action(async () => {
-    const updater = startUpdaterInBackground();
+    const updater = UPDATES_DISABLED ? Promise.resolve() : startUpdaterInBackground();
     try {
       const info = await fetchModels();
       console.log(pc.bold(pc.cyan('Proveedor:')) + ' ' + info.provider);
