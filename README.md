@@ -39,15 +39,30 @@ make up         # levanta el servidor en :8787 y abre el chat
 ```
 
 `make up` detiene el servidor al salir del chat. Alternativas:
-`make server` (solo el servidor), `make ask P="hola"`, `make models`,
+`make server` (solo el servidor), `make build` (solo compila cli/dist),
+`make ask P="hola"`, `make models`,
 `make test` (tipos + smoke test + demo con mocks, sin claves reales).
 
 Luego apunta la CLI al servidor local (make up ya lo hace por ti):
 
 ```bash
-node cli/dist/index.js config set-url http://localhost:8787
-node cli/dist/index.js config set-token EL_MISMO_CLIENT_TOKEN_DEL_.env
+node cli/dist/index.mjs config set-url http://localhost:8787
+node cli/dist/index.mjs config set-token EL_MISMO_CLIENT_TOKEN_DEL_.env
 ```
+
+### Probar desde otro dispositivo de tu LAN
+
+`make server`/`make up` ya escuchan en todas las interfaces, no solo en
+`localhost`. Para apuntar la CLI (de esta u otra máquina) a la IP correcta
+sin adivinar ni escribir `config set-url` a mano:
+
+```bash
+make use-lan
+```
+
+Detecta las IPs de red de tu PC (LAN, Tailscale, etc.), te deja elegir cuál
+usar y configura la CLI automáticamente (URL + token, si hay `CLIENT_TOKEN`
+en `worker/.env`).
 
 ### Configuración vía `.env`
 
