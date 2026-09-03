@@ -27,21 +27,16 @@ function int(env: Record<string, unknown>, name: string, fallback: number): numb
   return Number.isFinite(v) && v > 0 ? v : fallback;
 }
 
-// Toda la configuración sale de variables de entorno, así el mismo worker
-// funciona igual en Cloudflare (secrets/vars) y en el servidor local (.env).
+// Toda la configuración sale de variables de entorno (.env del servidor local).
 export function resolveConfig(env: Record<string, unknown>): ResolvedConfig {
-  const { provider, aliasBaseUrl } = getProvider(str(env, 'AI_PROVIDER'), env);
+  const { provider, aliasBaseUrl } = getProvider(str(env, 'AI_PROVIDER'));
 
   const apiKey =
     str(env, ...provider.keyEnvVars) ||
     (typeof env.AI_API_KEY === 'string' ? env.AI_API_KEY.trim() : '') ||
     '';
 
-  const baseUrl =
-    str(env, 'AI_BASE_URL') ||
-    aliasBaseUrl ||
-    (provider.id === 'gemini' ? str(env, 'GEMINI_BASE_URL') : undefined) ||
-    provider.defaultBaseUrl;
+  const baseUrl = str(env, 'AI_BASE_URL') || aliasBaseUrl || provider.defaultBaseUrl;
 
   const allowedRaw = str(env, 'AI_ALLOWED_MODELS');
   const allowedModels = allowedRaw

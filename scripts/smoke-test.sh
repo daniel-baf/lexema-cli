@@ -13,16 +13,6 @@ http.createServer((req,res)=>{let b="";req.on("data",c=>b+=c);req.on("end",()=>{
   res.end(JSON.stringify({choices:[{message:{content:"MOCK-REPLY("+body.model+"): "+(body.messages[body.messages.length-1].content)}}]}));
 });}).listen(4599);' &
 MOCK_OAI=$!
-node -e '
-const http = require("http");
-http.createServer((req,res)=>{let b="";req.on("data",c=>b+=c);req.on("end",()=>{
-  if(!req.url.includes(":generateContent")){res.writeHead(404);return res.end();}
-  if((req.headers["x-goog-api-key"]||"")!=="gk"){res.writeHead(403);return res.end("{}");}
-  const body=JSON.parse(b||"{}");
-  res.writeHead(200,{"Content-Type":"application/json"});
-  res.end(JSON.stringify({candidates:[{content:{parts:[{text:"GEMINI-REPLY: "+body.contents[0].parts[0].text}]}}]}));
-});}).listen(4598);' &
-MOCK_GEM=$!
 
 cat > .env.test <<'EOF'
 AI_PROVIDER=openai
@@ -34,7 +24,7 @@ MAX_PROMPT_LENGTH=50
 DAILY_LIMIT=3
 EOF
 
-ENV_FILE="$WORKER_DIR/.env.test" PORT=8787 npm run dev:node > /tmp/lexema-dev.log 2>&1 &
+ENV_FILE="$WORKER_DIR/.env.test" PORT=8787 npm run dev > /tmp/lexema-dev.log 2>&1 &
 DEV=$!
 sleep 3
 echo "=== startup log ==="; cat /tmp/lexema-dev.log
@@ -47,17 +37,17 @@ echo; echo "=== POST prompt largo (400 esperado) ==="; curl -s -w ' [%{http_code
 echo; echo "=== POST 4/4 (429 esperado) ==="; curl -s -w ' [%{http_code}]' -X POST http://localhost:8787/ -H 'Content-Type: application/json' -H 'Authorization: Bearer test-token' -d '{"prompt":"uno mas"}'
 echo; echo "=== GET raiz (405 esperado) ==="; curl -s -w ' [%{http_code}]' http://localhost:8787/
 
-ENV_FILE=/dev/null AI_PROVIDER=gemini GEMINI_API_KEY=gk AI_BASE_URL=http://localhost:4598/v1beta PORT=8788 npx tsx src/server.ts > /tmp/lexema-dev2.log 2>&1 &
+ENV_FILE=/dev/null AI_PROVIDER=groq AI_API_KEY=mock-key AI_BASE_URL=http://localhost:4599/v1 PORT=8788 npx tsx src/server.ts > /tmp/lexema-dev2.log 2>&1 &
 DEV2=$!
 sleep 3
-echo; echo "=== gemini health/models ==="; curl -s http://localhost:8788/health; echo; curl -s http://localhost:8788/models
-echo; echo "=== gemini POST ==="; curl -s -X POST http://localhost:8788/ -H 'Content-Type: application/json' -d '{"prompt":"hola gemini"}'
+echo; echo "=== alias groq health/models ==="; curl -s http://localhost:8788/health; echo; curl -s http://localhost:8788/models
+echo; echo "=== alias groq POST ==="; curl -s -X POST http://localhost:8788/ -H 'Content-Type: application/json' -d '{"prompt":"hola groq"}'
 
-ENV_FILE=/dev/null AI_PROVIDER=gemini PORT=8789 npx tsx src/server.ts > /tmp/lexema-dev3.log 2>&1 &
+ENV_FILE=/dev/null AI_PROVIDER=openrouter PORT=8789 npx tsx src/server.ts > /tmp/lexema-dev3.log 2>&1 &
 DEV3=$!
 sleep 3
-echo; echo "=== gemini sin key (500 esperado) ==="; curl -s -w ' [%{http_code}]' -X POST http://localhost:8789/ -H 'Content-Type: application/json' -d '{"prompt":"x"}'
+echo; echo "=== openrouter sin key (500 esperado) ==="; curl -s -w ' [%{http_code}]' -X POST http://localhost:8789/ -H 'Content-Type: application/json' -d '{"prompt":"x"}'
 
-kill $DEV $DEV2 $DEV3 $MOCK_OAI $MOCK_GEM 2>/dev/null
+kill $DEV $DEV2 $DEV3 $MOCK_OAI 2>/dev/null
 rm -f "$WORKER_DIR/.env.test"
 echo; echo DONE

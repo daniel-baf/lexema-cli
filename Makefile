@@ -4,7 +4,7 @@
 
 SCRIPTS := scripts
 
-.PHONY: help install env server up use-local use-lan build compile cli ask chat models config typecheck lint test demo clean deploy
+.PHONY: help install env server up use-local use-lan build compile cli ask chat models config typecheck lint test demo clean
 
 help: ## Lista los comandos disponibles
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -23,7 +23,7 @@ env: ## Crea worker/.env desde .env.example (si no existe)
 
 server: ## Levanta el servidor local de pruebas (http://localhost:8787)
 	@test -f worker/.env || { echo "Falta worker/.env. Corre primero: make env"; exit 1; }
-	@cd worker && npm run dev:node
+	@cd worker && npm run dev
 
 up: ## Levanta el servidor local y abre el chat (al salir se detiene todo)
 	@bash $(SCRIPTS)/up.sh
@@ -64,7 +64,7 @@ models: ## Lista los modelos del servidor configurado
 config: ## Muestra la configuración actual de la CLI
 	@node cli/dist/index.mjs config show
 
-typecheck: ## Verifica tipos de cli/ y worker/ (Cloudflare + servidor local)
+typecheck: ## Verifica tipos de cli/ y worker/
 	@cd cli && npm run typecheck
 	@cd worker && npm run typecheck
 
@@ -83,6 +83,3 @@ demo: ## Solo el demo del flujo canónico con .env
 
 clean: ## Borra artefactos de compilación
 	rm -rf cli/dist cli/dist-bin
-
-deploy: ## Publica el worker en Cloudflare
-	@cd worker && npm run deploy

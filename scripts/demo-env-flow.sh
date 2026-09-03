@@ -24,7 +24,7 @@ AI_API_KEY=demo-key
 CLIENT_TOKEN=demo-token
 EOF
 
-ENV_FILE="$ENV_FILE" npm run dev:node > /tmp/lexema-env-demo.log 2>&1 &
+ENV_FILE="$ENV_FILE" npm run dev > /tmp/lexema-env-demo.log 2>&1 &
 DEV=$!
 sleep 3
 

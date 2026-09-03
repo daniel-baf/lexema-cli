@@ -1,17 +1,17 @@
 # Lexema CLI
 
-CLI de IA para la terminal (`lexema ask`, `lexema chat`), con un Cloudflare
-Worker como proxy que oculta tu clave de API. El proveedor de IA es
-**agnóstico**: Gemini, OpenRouter, OpenAI, Groq o cualquier endpoint
-compatible — todo se configura con variables de entorno. Costo de
-infraestructura: **$0** (Cloudflare Workers free tier + free tier del
-proveedor + GitHub Releases).
+CLI de IA para la terminal (`lexema ask`, `lexema chat`), con un servidor
+propio (Node puro) como proxy que oculta tu clave de API. El proveedor de
+IA es **agnóstico**: OpenRouter, OpenAI, Groq o cualquier endpoint
+compatible con la API de OpenAI (`/chat/completions`) — todo se configura
+con variables de entorno. Corre en
+cualquier VM/servidor con Node, sin depender de ningún proveedor serverless.
 
 ```
 lexema-cli/
 ├── cli/            # El paquete de la CLI (TypeScript -> binario)
-├── worker/         # El Worker de Cloudflare / servidor local (proxy hacia la IA)
-├── scripts/        # Scripts de utilidad (SCREAM): up, smoke-test, demo, inject-token
+├── worker/         # Servidor (Node) — proxy hacia la IA
+├── scripts/        # Scripts de utilidad (SCREAM): up, smoke-test, demo, compile, inject-token
 ├── Makefile        # Comandos de desarrollo: make install, env, up, test...
 ├── install.sh      # Instalador para Linux/macOS
 ├── install.ps1      # Instalador para Windows
@@ -22,14 +22,11 @@ lexema-cli/
 
 - Node.js 18+ y npm.
 - Una API key de cualquier proveedor soportado:
-  - [Google AI Studio](https://aistudio.google.com/apikey) (Gemini, gratuita)
   - [OpenRouter](https://openrouter.ai/keys), OpenAI, Groq, ... o un LLM local
-- Para producción: cuenta de Cloudflare. **Para probar en local no
-  necesitas nada de Cloudflare.**
+- Para producción: una VM/servidor donde correr `worker/` con Node (por
+  ejemplo una instancia e2-micro de GCP, o cualquier otra).
 
-## 1. Probar en local (sin Cloudflare)
-
-Todo el flujo completo corre sobre Node puro con el mismo handler del Worker:
+## 1. Probar en local
 
 ```bash
 make install    # npm install en cli/ y worker/
@@ -76,33 +73,48 @@ en `worker/.env`).
 > Verificá con `sudo ufw status verbose` que la regla quedó activa, y
 > probá de nuevo desde la otra máquina.
 
-### Compilar un binario standalone para otra máquina (`make compile`)
+### Compilar binarios standalone para otra máquina (`make compile`)
 
-Para probar la CLI en otra VM/PC sin Node ni npm instalados, generá un
-binario único con la URL del servidor ya embebida:
+Para probar la CLI en otra VM/PC sin Node ni npm instalados, generá
+binarios con la URL del servidor ya embebida. Primero definí `SERVER_HOST`
+en `worker/.env` (ver la tabla de variables más abajo) con la IP o dominio
+del servidor:
+
+```bash
+# worker/.env
+SERVER_HOST=192.168.1.50
+PORT=8787
+```
 
 ```bash
 make compile
 ```
 
-Te pregunta si querés configurar la URL para este build (si decís que no,
-el binario queda con la URL de producción por defecto). Si decís que sí:
+Sin preguntas interactivas: arma la URL como `http://SERVER_HOST:PORT`,
+lee `CLIENT_TOKEN` de `worker/.env` si existe, y genera en
+`cli/dist-bin/` tres binarios con esa URL/token **ya embebidos como
+default** (igual que el workflow de releases inyecta el token compartido)
+— no hace falta copiar ningún archivo de configuración aparte:
 
-- Te propone la IP de red detectada de tu PC (o la que vos escribas) y el
-  puerto (`PORT` del `.env`, o `8787`).
-- Lee `CLIENT_TOKEN` de `worker/.env` si existe.
-- Genera `cli/dist-bin/lexema-linux-x64` con esa URL/token **ya embebidos
-  como default** dentro del propio binario (igual que el workflow de
-  releases inyecta el token compartido) — no hace falta copiar ningún
-  archivo de configuración aparte para que funcione.
+- `lexema-linux-x64`
+- `lexema-linux-arm64`
+- `lexema-windows-x64.exe`
+
+(Bun, el compilador usado acá, no soporta targets de 32 bits — solo
+x64/arm64. Para dispositivos ARM de 64 bits, como Raspberry Pi de 64 bits,
+usá el binario `arm64`.)
 
 En la otra máquina, **solo copiás la carpeta `cli/dist-bin/` completa**
 (incluye un `config.json` de respaldo, por si querés reapuntar el mismo
 binario a otro servidor sin recompilar) y corrés:
 
 ```bash
+# Linux
 chmod +x lexema-linux-x64
 ./lexema-linux-x64 chat
+
+# Windows
+lexema-windows-x64.exe chat
 ```
 
 Si esa otra máquina no ve la URL/puerto que acabás de configurar, revisá:
@@ -122,8 +134,8 @@ Distribuir el servidor es literalmente repartir ese archivo:
 
 | Variable | Descripción |
 |---|---|
-| `AI_PROVIDER` | `gemini` \| `openai` \| `openrouter` \| `groq`. Sin definir: autodetecta por la key presente |
-| `AI_API_KEY` | Clave genérica. O usa la específica: `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `OPENAI_API_KEY` |
+| `AI_PROVIDER` | `openai` \| `openrouter` \| `groq`. Sin definir: `openai` |
+| `AI_API_KEY` | Clave genérica. O usa la específica: `OPENROUTER_API_KEY`, `OPENAI_API_KEY` |
 | `AI_BASE_URL` | Endpoint base (se autodetecta por proveedor; útil para LLMs locales) |
 | `AI_DEFAULT_MODEL` | Modelo por defecto si la CLI no envía `-m` |
 | `AI_ALLOWED_MODELS` | Lista blanca `m1,m2`. Vacía = sin restricción |
@@ -134,6 +146,7 @@ Distribuir el servidor es literalmente repartir ese archivo:
 | `PORT` | Solo servidor local (default 8787) |
 | `UPDATE_FILE` | Fuerza el archivo que sirve `GET /download` (updater) |
 | `INSTALL_FILE` | Binario de la CLI que sirve `GET /install` (default `cli/dist-bin/lexema-linux-x64`) |
+| `SERVER_HOST` | Solo `make compile`: IP/dominio del servidor que se embebe como default en los binarios standalone |
 
 El servidor local carga `.dev.vars` y luego `.env` (este último gana);
 `ENV_FILE=otro-archivo` para apuntar a otro. Endpoints expuestos:
@@ -159,53 +172,36 @@ servidor y el token embebidos) que descarga el binario de
 `GET /install/binary` y lo deja en `/usr/local/bin/lexema` (con `sudo` si
 hace falta). Si no hay binario compilado, responde 404 con instrucciones.
 
-## 2. Desplegar el Worker (producción)
+## 2. Correr el servidor en producción (tu propia VM)
+
+No hay ningún proveedor serverless de por medio: `worker/` es un servidor
+Node normal, así que en producción se corre igual que en local, en la VM
+que elijas.
 
 ```bash
-cd worker
-npm install
-npx wrangler login          # abre el navegador y autoriza tu cuenta de Cloudflare
-
-# Secretos (no se guardan en el código):
-npx wrangler secret put AI_API_KEY       # (o GEMINI_API_KEY / OPENROUTER_API_KEY)
-npx wrangler secret put CLIENT_TOKEN
-# inventa un token largo y aleatorio: openssl rand -hex 32
-# Este token protege tu Worker de que cualquiera lo use y gaste tu cuota.
-#
-# Importante: si pegas el token con un pipe (`$token | wrangler secret put ...`)
-# en PowerShell, se le puede colar un salto de línea al final y el token dejará
-# de coincidir con el que guardes en la CLI. Usa el prompt interactivo de
-# `wrangler secret put` (pégalo a mano) o, en bash, `printf '%s' "$TOKEN" | wrangler secret put CLIENT_TOKEN`.
-
-# Configuración no-secreta (proveedor, modelos, límites) en wrangler.toml:
-#   [vars]
-#   AI_PROVIDER = "openrouter"
-#   AI_DEFAULT_MODEL = "openrouter/auto"
-
-npm run deploy
+# En la VM
+git clone <tu-fork>
+cd lexema-cli
+make install
+make env
+$EDITOR worker/.env   # proveedor, API key y un CLIENT_TOKEN largo y aleatorio
+                       # (generalo con: openssl rand -hex 32)
+make server            # o corré worker/ detrás de systemd/pm2/tmux para que persista
 ```
 
-Al terminar, `wrangler` te dará una URL como:
+Guardá la IP/dominio de la VM y el `CLIENT_TOKEN`, los necesitás para
+configurar la CLI (`config set-url` / `config set-token`, o compilá un
+binario ya apuntado con `make compile`, ver arriba).
 
-```
-https://lexema-api.<tu-subdominio>.workers.dev
-```
+### Rate limiting por IP
 
-Guárdala, la necesitas para configurar la CLI.
-
-### (Opcional pero recomendado) Rate limiting por IP
-
-Un token compartido dentro de un binario público **se puede extraer** por un
-usuario con conocimientos técnicos, así que no es una protección perfecta.
-Para un límite adicional, activa Workers KV:
-
-```bash
-npx wrangler kv namespace create RATE_LIMIT_KV
-```
-
-Copia el `id` que te devuelve y descomenta el bloque `[[kv_namespaces]]` en
-`worker/wrangler.toml`, luego vuelve a correr `npm run deploy`. Con esto,
-cada IP queda limitada a `DAILY_LIMIT` peticiones por día.
+El servidor ya trae rate limiting en memoria (no persiste reinicios):
+cada IP queda limitada a `DAILY_LIMIT` peticiones por día. No requiere
+configuración aparte, solo definir `DAILY_LIMIT` en `worker/.env` si el
+default (100) no te sirve. Un token compartido dentro de un binario
+público **se puede extraer** por un usuario con conocimientos técnicos,
+así que `CLIENT_TOKEN` + `DAILY_LIMIT` combinados no son una protección
+perfecta, pero sí un límite razonable de abuso.
 
 ## 3. Configurar y probar la CLI en local
 
@@ -214,7 +210,7 @@ cd cli
 npm install
 npm run build
 
-node dist/index.js config set-url https://lexema-api.<tu-subdominio>.workers.dev
+node dist/index.js config set-url http://<ip-o-dominio-de-tu-servidor>:8787
 node dist/index.js config set-token EL_MISMO_TOKEN_QUE_PUSISTE_EN_CLIENT_TOKEN
 
 node dist/index.js ask "Hola, preséntate en una línea"
@@ -235,7 +231,7 @@ git remote add origin https://github.com/diegoabdo/lexema-cli.git
 git push -u origin main
 ```
 
-> El Worker (`worker/`) puede vivir en el mismo repo (como aquí) o en uno
+> El servidor (`worker/`) puede vivir en el mismo repo (como aquí) o en uno
 > aparte; no afecta el resto de la guía.
 
 ## 5. Publicar binarios automáticamente (GitHub Actions)
@@ -306,7 +302,7 @@ lexema chat
 | `lexema chat` | Sesión interactiva (escribe "exit" para terminar) |
 | `lexema models` | Lista proveedor, modelo por defecto y modelos permitidos |
 | `lexema config show` | Ver configuración actual |
-| `lexema config set-url <url>` | Cambiar la URL del Worker |
+| `lexema config set-url <url>` | Cambiar la URL del servidor |
 | `lexema config set-token <token>` | Guardar el token de autenticación |
 | `lexema config set-model <modelo>` | Fijar un modelo por defecto |
 
@@ -321,11 +317,10 @@ La configuración se guarda en `~/.lexema/config.json`.
 | `make up` | Levanta el servidor local + chat; al salir detiene todo |
 | `make server` | Solo el servidor local (`:8787`) |
 | `make use-lan` | Detecta IPs de red y apunta la CLI a una de ellas (probar desde otro dispositivo) |
-| `make compile` | Genera `cli/dist-bin/lexema-linux-x64`, binario standalone con URL/token embebidos |
+| `make compile` | Genera binarios standalone (linux-x64, linux-arm64, windows-x64) con URL/token embebidos, desde `SERVER_HOST`/`PORT`/`CLIENT_TOKEN` de `worker/.env` |
 | `make test` | Tipos + smoke test + demo (mocks, sin claves reales) |
 | `make ask P="..."` / `make chat` / `make models` | Atajos de la CLI |
 | `make typecheck` / `make build` / `make clean` | Tipos, compilar, limpiar |
-| `make deploy` | Publica el worker en Cloudflare |
 
 ## Siguientes pasos sugeridos (no incluidos todavía)
 

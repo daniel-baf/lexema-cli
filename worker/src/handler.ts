@@ -7,8 +7,9 @@ export interface KVLike {
   put(key: string, value: string, opts?: { expirationTtl?: number }): Promise<void>;
 }
 
-// Fuente del archivo de actualización (GET /download). El servidor local
-// implementa una que lee de disco; el Worker de Cloudflare usa UPDATE_URL.
+// Fuente del archivo de actualización (GET /download): el servidor local
+// implementa una que lee de disco; cfg.updateUrl es la alternativa remota
+// (pasarela fetch) para cuando el archivo no vive en el propio disco.
 export interface UpdateFile {
   bytes: Uint8Array;
   filename: string;
@@ -98,8 +99,7 @@ echo "Probá: \$BIN_NAME models"
 `;
 }
 
-// Manejador compartido entre el Worker de Cloudflare (index.ts) y el
-// servidor local de pruebas (server.ts). Recibe una Request estándar.
+// Manejador HTTP del servidor local (server.ts). Recibe una Request estándar.
 export async function handleRequest(
   request: Request,
   cfg: ResolvedConfig,
@@ -140,8 +140,8 @@ export async function handleRequest(
   // Entrega del updater. El servidor no decide nada: siempre envía el
   // archivo y la lógica de versiones/actualización vive en el propio
   // script que recibe la CLI. Dos fuentes, en orden:
-  // 1) updateFile: archivo local (servidor de pruebas sobre Node).
-  // 2) cfg.updateUrl: URL remota con pasarela fetch (Worker de Cloudflare);
+  // 1) updateFile: archivo local (servidor sobre Node).
+  // 2) cfg.updateUrl: URL remota con pasarela fetch;
   //    admite el placeholder {platform} (p.ej. linux-x64, win-x64.exe).
   if (request.method === 'GET' && path === '/download') {
     if (updateFile) {
@@ -187,9 +187,9 @@ export async function handleRequest(
   }
 
   // Instalación remota de la CLI (solo servidores con el binario en disco;
-  // en Cloudflare no hay fuente y responde 404). GET /install devuelve el
-  // script sh listo para "curl .../install | sh" y GET /install/binary el
-  // binario compilado. Comparten la autenticación global de arriba.
+  // sin binario responde 404). GET /install devuelve el script sh listo
+  // para "curl .../install | sh" y GET /install/binary el binario
+  // compilado. Comparten la autenticación global de arriba.
   if (request.method === 'GET' && (path === '/install' || path === '/install.sh')) {
     const binary = installBinary ? await installBinary() : null;
     if (!binary) {
@@ -230,8 +230,7 @@ export async function handleRequest(
     return json({ error: 'Método no permitido' }, 405);
   }
 
-  // Rate limiting opcional por IP (requiere un binding KV en Cloudflare,
-  // o el KV en memoria del servidor local).
+  // Rate limiting opcional por IP (KV en memoria del servidor local).
   if (kv) {
     const ip = request.headers.get('CF-Connecting-IP') || 'local';
     const limited = await rateLimited(ip, kv, cfg.dailyLimit);
@@ -241,7 +240,7 @@ export async function handleRequest(
   if (!cfg.apiKey) {
     return json(
       {
-        error: `El servidor no tiene configurada la clave de API. Define ${cfg.providerId === 'gemini' ? 'GEMINI_API_KEY' : 'AI_API_KEY (o la variable del proveedor)'} en el .env o en los secrets.`,
+        error: 'El servidor no tiene configurada la clave de API. Define AI_API_KEY (o la variable del proveedor) en el .env.',
       },
       500
     );

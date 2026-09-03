@@ -1,10 +1,8 @@
-// Servidor local de pruebas: corre el mismo handler del Worker de
-// Cloudflare sobre Node puro (sin wrangler ni cuenta de Cloudflare).
-// Lee la configuración de un archivo .env (o .dev.vars) y expone
-// exactamente los mismos endpoints que el Worker desplegado.
+// Servidor HTTP sobre Node puro (proxy hacia el proveedor de IA).
+// Lee la configuración de un archivo .env (o .dev.vars).
 //
-//   npm run dev:node            # http://localhost:8787
-//   PORT=3000 npm run dev:node
+//   npm run dev            # http://localhost:8787
+//   PORT=3000 npm run dev
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';

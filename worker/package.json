@@ -3,25 +3,17 @@
   "private": true,
   "version": "1.0.0",
   "scripts": {
-    "dev": "wrangler dev",
-    "dev:node": "tsx src/server.ts",
-    "deploy": "wrangler deploy",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.server.json",
+    "dev": "tsx src/server.ts",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "lint": "eslint .",
-    "secret:provider": "wrangler secret put AI_PROVIDER",
-    "secret:key": "wrangler secret put AI_API_KEY",
-    "secret:token": "wrangler secret put CLIENT_TOKEN",
-    "kv:create": "wrangler kv namespace create RATE_LIMIT_KV"
+    "lint": "eslint ."
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20260828.1",
     "@types/node": "^20.14.0",
     "eslint": "^10.9.1",
     "tsx": "^4.19.0",
     "typescript": "^5.5.4",
     "typescript-eslint": "^8.68.0",
-    "vitest": "^4.1.11",
-    "wrangler": "^4.127.1"
+    "vitest": "^4.1.11"
   }
 }
