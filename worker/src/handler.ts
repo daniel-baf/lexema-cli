@@ -47,13 +47,65 @@ function rateLimited(ip: string, kv: KVLike, dailyLimit: number): Promise<Respon
   })();
 }
 
+// Script de instalación que entrega GET /install. Se genera por pedido para
+// embeber la URL del servidor y el token (si hay): así el flujo
+// "curl -fsSL <servidor>/install | sh" funciona con un solo comando, sin
+// pasar el header dos veces. Deja el binario en /usr/local/bin (con sudo si
+// hace falta) y avisa si el directorio no está en el PATH.
+function buildInstallScript(origin: string, token?: string): string {
+  const authCurl = token ? `-H "Authorization: Bearer ${token}" ` : '';
+  const authWget = token ? `--header="Authorization: Bearer ${token}" ` : '';
+  return `#!/bin/sh
+# Instalador de Lexema CLI — servido por el propio servidor Lexema.
+# Uso: curl -fsSL ${origin}/install | sh
+set -e
+
+SERVER="${origin}"
+BIN_NAME="lexema"
+INSTALL_DIR="/usr/local/bin"
+
+fetch() { # $1=url $2=destino
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL ${authCurl}-o "$2" "$1"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q ${authWget}-O "$2" "$1"
+  else
+    echo "Se necesita curl o wget para instalar." >&2
+    exit 1
+  fi
+}
+
+TMP="\$(mktemp)"
+trap 'rm -f "\$TMP"' EXIT
+
+echo "Descargando Lexema CLI desde \$SERVER..."
+fetch "\$SERVER/install/binary" "\$TMP"
+chmod +x "\$TMP"
+
+if [ -w "\$INSTALL_DIR" ]; then
+  mv -f "\$TMP" "\$INSTALL_DIR/\$BIN_NAME"
+else
+  echo "Se requieren permisos de administrador para instalar en \$INSTALL_DIR" >&2
+  sudo mv -f "\$TMP" "\$INSTALL_DIR/\$BIN_NAME"
+fi
+
+echo "✔ Lexema CLI instalado en \$INSTALL_DIR/\$BIN_NAME"
+case ":\$PATH:" in
+  *":\$INSTALL_DIR:"*) ;;
+  *) echo "⚠ Agrega \$INSTALL_DIR a tu PATH: export PATH=\\\$PATH:\$INSTALL_DIR" ;;
+esac
+echo "Probá: \$BIN_NAME models"
+`;
+}
+
 // Manejador compartido entre el Worker de Cloudflare (index.ts) y el
 // servidor local de pruebas (server.ts). Recibe una Request estándar.
 export async function handleRequest(
   request: Request,
   cfg: ResolvedConfig,
   kv?: KVLike,
-  updateFile?: UpdateFileSource
+  updateFile?: UpdateFileSource,
+  installBinary?: UpdateFileSource
 ): Promise<Response> {
   if (request.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders() });
@@ -132,6 +184,46 @@ export async function handleRequest(
       });
     }
     return json({ error: 'Actualizaciones no configuradas en el servidor' }, 404);
+  }
+
+  // Instalación remota de la CLI (solo servidores con el binario en disco;
+  // en Cloudflare no hay fuente y responde 404). GET /install devuelve el
+  // script sh listo para "curl .../install | sh" y GET /install/binary el
+  // binario compilado. Comparten la autenticación global de arriba.
+  if (request.method === 'GET' && (path === '/install' || path === '/install.sh')) {
+    const binary = installBinary ? await installBinary() : null;
+    if (!binary) {
+      return json(
+        {
+          error:
+            'Binario de la CLI no disponible en el servidor. Compilá con "make compile" o define INSTALL_FILE en el .env.',
+        },
+        404
+      );
+    }
+    return new Response(buildInstallScript(new URL(request.url).origin, cfg.clientToken), {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/x-shellscript; charset=utf-8',
+        'Cache-Control': 'no-store',
+        ...corsHeaders(),
+      },
+    });
+  }
+
+  if (request.method === 'GET' && path === '/install/binary') {
+    const binary = installBinary ? await installBinary() : null;
+    if (!binary) {
+      return json({ error: 'Binario de la CLI no disponible en el servidor' }, 404);
+    }
+    return new Response(binary.bytes, {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'Content-Disposition': `attachment; filename="${binary.filename}"`,
+        ...corsHeaders(),
+      },
+    });
   }
 
   if (request.method !== 'POST') {

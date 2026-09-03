@@ -222,3 +222,86 @@ describe('GET /download', () => {
     }
   });
 });
+
+describe('GET /install', () => {
+  const binarySource = vi.fn().mockResolvedValue({ bytes: new Uint8Array([1]), filename: 'lexema' });
+
+  it('sin binario en el servidor devuelve 404', async () => {
+    const res = await handleRequest(new Request('http://localhost/install'), baseConfig());
+    expect(res.status).toBe(404);
+  });
+
+  it('devuelve el script sh con la URL del servidor embebida', async () => {
+    const res = await handleRequest(
+      new Request('http://mi-vm:8787/install'),
+      baseConfig(),
+      undefined,
+      undefined,
+      binarySource
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toContain('shellscript');
+    const script = await res.text();
+    expect(script).toContain('SERVER="http://mi-vm:8787"');
+    expect(script).toContain('$SERVER/install/binary');
+    expect(script).not.toContain('Authorization');
+  });
+
+  it('con CLIENT_TOKEN embebe el header en el script', async () => {
+    const res = await handleRequest(
+      new Request('http://localhost/install', {
+        headers: { Authorization: 'Bearer secreto' },
+      }),
+      baseConfig({ clientToken: 'secreto' }),
+      undefined,
+      undefined,
+      binarySource
+    );
+    const script = await res.text();
+    expect(script).toContain('Authorization: Bearer secreto');
+  });
+
+  it('/install.sh es alias de /install', async () => {
+    const res = await handleRequest(
+      new Request('http://localhost/install.sh'),
+      baseConfig(),
+      undefined,
+      undefined,
+      binarySource
+    );
+    expect(res.status).toBe(200);
+  });
+});
+
+describe('GET /install/binary', () => {
+  it('sirve el binario compilado como octet-stream', async () => {
+    const source = vi.fn().mockResolvedValue({ bytes: new Uint8Array([7, 8, 9]), filename: 'lexema' });
+    const res = await handleRequest(
+      new Request('http://localhost/install/binary'),
+      baseConfig(),
+      undefined,
+      undefined,
+      source
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toBe('application/octet-stream');
+    expect(res.headers.get('Content-Disposition')).toBe('attachment; filename="lexema"');
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(new Uint8Array([7, 8, 9]));
+  });
+
+  it('sin binario compilado devuelve 404', async () => {
+    const res = await handleRequest(
+      new Request('http://localhost/install/binary'),
+      baseConfig()
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it('exige el CLIENT_TOKEN como el resto de endpoints', async () => {
+    const res = await handleRequest(
+      new Request('http://localhost/install/binary'),
+      baseConfig({ clientToken: 'secreto' })
+    );
+    expect(res.status).toBe(401);
+  });
+});

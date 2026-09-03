@@ -132,10 +132,32 @@ Distribuir el servidor es literalmente repartir ese archivo:
 | `MAX_PROMPT_LENGTH` | Límite de caracteres del prompt (default 4000) |
 | `DAILY_LIMIT` | Peticiones por IP por día (default 100) |
 | `PORT` | Solo servidor local (default 8787) |
+| `UPDATE_FILE` | Fuerza el archivo que sirve `GET /download` (updater) |
+| `INSTALL_FILE` | Binario de la CLI que sirve `GET /install` (default `cli/dist-bin/lexema-linux-x64`) |
 
 El servidor local carga `.dev.vars` y luego `.env` (este último gana);
 `ENV_FILE=otro-archivo` para apuntar a otro. Endpoints expuestos:
-`POST /` (chat), `GET /models`, `GET /health`.
+`POST /` (chat), `GET /models`, `GET /health`, `GET /download` (updater)
+y `GET /install` (instalador de la CLI).
+
+### Instalar la CLI desde el servidor (curl | sh)
+
+Si en la VM hay un binario compilado (`make compile` genera
+`cli/dist-bin/lexema-linux-x64`, o apunta `INSTALL_FILE` a donde hayas
+subido el ejecutable), cualquier máquina lo instala con un comando:
+
+```bash
+# Sin CLIENT_TOKEN:
+curl -fsSL http://<ip-vm>:8787/install | sh
+
+# Con CLIENT_TOKEN (el token viaja en el curl; el script ya lo lleva embebido):
+curl -fsSL -H "Authorization: Bearer $TOKEN" http://<ip-vm>:8787/install | sh
+```
+
+`GET /install` devuelve un script sh generado al vuelo (con la URL del
+servidor y el token embebidos) que descarga el binario de
+`GET /install/binary` y lo deja en `/usr/local/bin/lexema` (con `sudo` si
+hace falta). Si no hay binario compilado, responde 404 con instrucciones.
 
 ## 2. Desplegar el Worker (producción)
 

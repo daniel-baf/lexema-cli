@@ -121,11 +121,47 @@ function main(): void {
     }
   };
 
+  // Binario de la CLI que se sirve en GET /install (curl .../install | sh)
+  // y GET /install/binary. INSTALL_FILE en el .env tiene prioridad (por si
+  // subís el ejecutable compilado a otra ruta); el default es el que genera
+  // "make compile" (cli/dist-bin/lexema-linux-x64), resuelto desde worker/
+  // o desde la raíz del repo según dónde se haya iniciado el servidor.
+  const CLI_BIN_CANDIDATES = [
+    path.resolve(process.cwd(), '..', 'cli', 'dist-bin', 'lexema-linux-x64'),
+    path.resolve(process.cwd(), 'cli', 'dist-bin', 'lexema-linux-x64'),
+  ];
+
+  const resolveCliBinary = (): string | null => {
+    const override = process.env.INSTALL_FILE;
+    if (override) return path.resolve(process.cwd(), override);
+    for (const candidate of CLI_BIN_CANDIDATES) {
+      if (fs.existsSync(candidate)) return candidate;
+    }
+    return null;
+  };
+
+  const makeInstallBinarySource = () => async (): Promise<UpdateFile | null> => {
+    const file = resolveCliBinary();
+    if (!file) return null; // sin binario: /install responde 404 con instrucción
+    try {
+      const bytes = await fs.promises.readFile(file);
+      return { bytes: new Uint8Array(bytes), filename: 'lexema' };
+    } catch {
+      return null;
+    }
+  };
+
   const server = http.createServer(async (req, res) => {
     try {
       const webReq = await toWebRequest(req);
       const platform = new URL(webReq.url).searchParams.get('platform') || '';
-      const webRes = await handleRequest(webReq, cfg, kv, makeUpdateFileSource(platform));
+      const webRes = await handleRequest(
+        webReq,
+        cfg,
+        kv,
+        makeUpdateFileSource(platform),
+        makeInstallBinarySource()
+      );
       await sendWebResponse(res, webRes);
     } catch (err) {
       console.error(err);
@@ -140,9 +176,15 @@ function main(): void {
     console.log(`Modelo por defecto: ${cfg.defaultModel}`);
     console.log(`API key: ${cfg.apiKey ? 'configurada' : pcRed('FALTA (revisa tu .env)')}`);
     console.log(`Auth (CLIENT_TOKEN): ${cfg.clientToken ? 'activada' : 'desactivada'}`);
-    console.log(`Endpoints: POST /  ·  GET /models  ·  GET /health  ·  GET /download`);
+    console.log(`Endpoints: POST /  ·  GET /models  ·  GET /health  ·  GET /download  ·  GET /install`);
     console.log(
       `Updater: linux -> ${UPDATER_FILES.linux}  ·  win32 -> ${UPDATER_FILES.win32}  ·  fallback -> ${FALLBACK_UPDATER}`
+    );
+    const cliBinary = resolveCliBinary();
+    console.log(
+      `Instalador CLI: ${
+        cliBinary ? cliBinary : 'sin binario (corre "make compile" o define INSTALL_FILE en el .env)'
+      }`
     );
   });
 }
