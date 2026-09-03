@@ -18,8 +18,11 @@ export interface LexemaConfig {
 // LEXEMA_CLIENT_TOKEN de GitHub Actions.
 const DEFAULT_CLIENT_TOKEN = '';
 
+// Default genérico (servidor local): no apunta a ningún servicio propio.
+// "make compile" reemplaza este valor por el SERVER_HOST/PORT de worker/.env
+// al armar el binario standalone (ver scripts/compile.mjs).
 const DEFAULT_CONFIG: LexemaConfig = {
-  workerUrl: 'https://lexema-api.diego12.workers.dev',
+  workerUrl: 'http://localhost:8787',
   token: DEFAULT_CLIENT_TOKEN || undefined,
 };
 

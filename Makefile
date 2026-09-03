@@ -41,7 +41,7 @@ use-lan: ## Detecta las IPs de esta máquina y elegí cuál usa la CLI (para pro
 build: ## Compila la CLI (cli/dist)
 	@cd cli && npm run build
 
-compile: ## Genera el binario standalone (cli/dist-bin) preguntando IP/puerto, para probar en otra VM
+compile: ## Genera binarios standalone (cli/dist-bin): linux-x64, linux-arm64, windows-x64, apuntando a SERVER_HOST de worker/.env
 	@node $(SCRIPTS)/compile.mjs
 
 cli: ## Corre la CLI local: make cli CMD="models"

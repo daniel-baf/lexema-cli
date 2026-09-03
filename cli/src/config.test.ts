@@ -20,7 +20,7 @@ describe('loadConfig / saveConfig', () => {
   it('devuelve la config por defecto si no existe archivo', async () => {
     const { loadConfig } = await import('./config');
     const cfg = loadConfig();
-    expect(cfg.workerUrl).toBe('https://lexema-api.diego12.workers.dev');
+    expect(cfg.workerUrl).toBe('http://localhost:8787');
   });
 
   it('guarda y vuelve a leer la config (round-trip)', async () => {
