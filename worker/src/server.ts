@@ -119,31 +119,46 @@ function main(): void {
     }
   };
 
-  // Binario de la CLI que se sirve en GET /install (curl .../install | sh)
-  // y GET /install/binary. INSTALL_FILE en el .env tiene prioridad (por si
-  // subís el ejecutable compilado a otra ruta); el default es el que genera
-  // "make compile" (cli/dist-bin/lexema-linux-x64), resuelto desde worker/
-  // o desde la raíz del repo según dónde se haya iniciado el servidor.
-  const CLI_BIN_CANDIDATES = [
-    path.resolve(process.cwd(), '..', 'cli', 'dist-bin', 'lexema-linux-x64'),
-    path.resolve(process.cwd(), 'cli', 'dist-bin', 'lexema-linux-x64'),
+  // Binarios de la CLI servidos por GET /install (Linux, autodetección de
+  // arquitectura), GET /install.ps1 (Windows) y GET /install/binary?os=...
+  // INSTALL_FILE en el .env tiene prioridad y fuerza UN único archivo para
+  // todos los OS (por si subís un ejecutable a otra ruta); el default es lo
+  // que genera "make compile" en cli/dist-bin, resuelto desde worker/ o
+  // desde la raíz del repo según dónde se haya iniciado el servidor.
+  const CLI_BIN_DIRS = [
+    path.resolve(process.cwd(), '..', 'cli', 'dist-bin'),
+    path.resolve(process.cwd(), 'cli', 'dist-bin'),
   ];
+  const INSTALL_FILES: Record<string, string> = {
+    'linux-x64': 'lexema-linux-x64',
+    'linux-arm64': 'lexema-linux-arm64',
+    'windows-x64': 'lexema-windows-x64.exe',
+  };
+  // Nombre con el que llega el archivo al cliente (Content-Disposition).
+  const INSTALL_OUT_NAMES: Record<string, string> = {
+    'linux-x64': 'lexema',
+    'linux-arm64': 'lexema',
+    'windows-x64': 'lexema.exe',
+  };
 
-  const resolveCliBinary = (): string | null => {
+  const resolveCliBinary = (os: string): string | null => {
     const override = process.env.INSTALL_FILE;
     if (override) return path.resolve(process.cwd(), override);
-    for (const candidate of CLI_BIN_CANDIDATES) {
+    const rel = INSTALL_FILES[os];
+    if (!rel) return null;
+    for (const dir of CLI_BIN_DIRS) {
+      const candidate = path.join(dir, rel);
       if (fs.existsSync(candidate)) return candidate;
     }
     return null;
   };
 
-  const makeInstallBinarySource = () => async (): Promise<UpdateFile | null> => {
-    const file = resolveCliBinary();
-    if (!file) return null; // sin binario: /install responde 404 con instrucción
+  const makeInstallBinarySource = () => async (os: string): Promise<UpdateFile | null> => {
+    const file = resolveCliBinary(os);
+    if (!file) return null; // sin binario para ese OS: /install responde 404
     try {
       const bytes = await fs.promises.readFile(file);
-      return { bytes: new Uint8Array(bytes), filename: 'lexema' };
+      return { bytes: new Uint8Array(bytes), filename: INSTALL_OUT_NAMES[os] || 'lexema' };
     } catch {
       return null;
     }
@@ -178,12 +193,14 @@ function main(): void {
     console.log(
       `Updater: linux -> ${UPDATER_FILES.linux}  ·  win32 -> ${UPDATER_FILES.win32}  ·  fallback -> ${FALLBACK_UPDATER}`
     );
-    const cliBinary = resolveCliBinary();
-    console.log(
-      `Instalador CLI: ${
-        cliBinary ? cliBinary : 'sin binario (corre "make compile" o define INSTALL_FILE en el .env)'
-      }`
-    );
+    for (const os of Object.keys(INSTALL_FILES)) {
+      const file = resolveCliBinary(os);
+      console.log(
+        `Instalador CLI (${os}): ${
+          file ? file : 'falta (corre "make compile")'
+        }`
+      );
+    }
   });
 }
 

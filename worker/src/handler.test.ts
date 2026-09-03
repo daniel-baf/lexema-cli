@@ -243,7 +243,8 @@ describe('GET /install', () => {
     expect(res.headers.get('Content-Type')).toContain('shellscript');
     const script = await res.text();
     expect(script).toContain('SERVER="http://mi-vm:8787"');
-    expect(script).toContain('$SERVER/install/binary');
+    expect(script).toContain('Linux-x86_64) OS="linux-x64"');
+    expect(script).toContain('$SERVER/install/binary?os=$OS');
     expect(script).not.toContain('Authorization');
   });
 
@@ -273,8 +274,47 @@ describe('GET /install', () => {
   });
 });
 
+describe('GET /install.ps1', () => {
+  const winSource = vi.fn().mockResolvedValue({ bytes: new Uint8Array([1]), filename: 'lexema.exe' });
+
+  it('sin binario de Windows devuelve 404', async () => {
+    const res = await handleRequest(new Request('http://localhost/install.ps1'), baseConfig());
+    expect(res.status).toBe(404);
+  });
+
+  it('devuelve el script PowerShell apuntando al binario de Windows', async () => {
+    const res = await handleRequest(
+      new Request('http://mi-vm:8787/install.ps1'),
+      baseConfig(),
+      undefined,
+      undefined,
+      winSource
+    );
+    expect(res.status).toBe(200);
+    expect(winSource).toHaveBeenCalledWith('windows-x64');
+    const script = await res.text();
+    expect(script).toContain('$Server = "http://mi-vm:8787"');
+    expect(script).toContain('install/binary?os=windows-x64');
+    expect(script).not.toContain('Authorization');
+  });
+
+  it('con CLIENT_TOKEN embebe el header en el script', async () => {
+    const res = await handleRequest(
+      new Request('http://localhost/install.ps1', {
+        headers: { Authorization: 'Bearer secreto' },
+      }),
+      baseConfig({ clientToken: 'secreto' }),
+      undefined,
+      undefined,
+      winSource
+    );
+    const script = await res.text();
+    expect(script).toContain('$headers.Authorization = "Bearer secreto"');
+  });
+});
+
 describe('GET /install/binary', () => {
-  it('sirve el binario compilado como octet-stream', async () => {
+  it('sirve el binario del OS pedido (default linux-x64)', async () => {
     const source = vi.fn().mockResolvedValue({ bytes: new Uint8Array([7, 8, 9]), filename: 'lexema' });
     const res = await handleRequest(
       new Request('http://localhost/install/binary'),
@@ -284,9 +324,48 @@ describe('GET /install/binary', () => {
       source
     );
     expect(res.status).toBe(200);
+    expect(source).toHaveBeenCalledWith('linux-x64');
     expect(res.headers.get('Content-Type')).toBe('application/octet-stream');
     expect(res.headers.get('Content-Disposition')).toBe('attachment; filename="lexema"');
     expect(new Uint8Array(await res.arrayBuffer())).toEqual(new Uint8Array([7, 8, 9]));
+  });
+
+  it('?os=windows-x64 pide el binario de Windows', async () => {
+    const source = vi.fn().mockResolvedValue({ bytes: new Uint8Array([1]), filename: 'lexema.exe' });
+    const res = await handleRequest(
+      new Request('http://localhost/install/binary?os=windows-x64'),
+      baseConfig(),
+      undefined,
+      undefined,
+      source
+    );
+    expect(res.status).toBe(200);
+    expect(source).toHaveBeenCalledWith('windows-x64');
+    expect(res.headers.get('Content-Disposition')).toBe('attachment; filename="lexema.exe"');
+  });
+
+  it('?os= inválido cae al default (linux-x64)', async () => {
+    const source = vi.fn().mockResolvedValue({ bytes: new Uint8Array([1]), filename: 'lexema' });
+    await handleRequest(
+      new Request('http://localhost/install/binary?os=templeos'),
+      baseConfig(),
+      undefined,
+      undefined,
+      source
+    );
+    expect(source).toHaveBeenCalledWith('linux-x64');
+  });
+
+  it('sin binario para el OS pedido devuelve 404', async () => {
+    const source = vi.fn().mockResolvedValue(null);
+    const res = await handleRequest(
+      new Request('http://localhost/install/binary?os=windows-x64'),
+      baseConfig(),
+      undefined,
+      undefined,
+      source
+    );
+    expect(res.status).toBe(404);
   });
 
   it('sin binario compilado devuelve 404', async () => {

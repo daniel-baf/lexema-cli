@@ -11,11 +11,9 @@ cualquier VM/servidor con Node, sin depender de ningún proveedor serverless.
 lexema-cli/
 ├── cli/            # El paquete de la CLI (TypeScript -> binario)
 ├── worker/         # Servidor (Node) — proxy hacia la IA
-├── scripts/        # Scripts de utilidad (SCREAM): up, smoke-test, demo, compile, inject-token
+├── scripts/        # Scripts de utilidad (SCREAM): up, smoke-test, demo, compile
 ├── Makefile        # Comandos de desarrollo: make install, env, up, test...
-├── install.sh      # Instalador para Linux/macOS
-├── install.ps1      # Instalador para Windows
-└── .github/workflows/release.yml   # Compila y publica binarios al crear un tag
+└── .github/workflows/ci.yml   # CI: typecheck + lint + tests
 ```
 
 ## 0. Requisitos
@@ -93,8 +91,7 @@ make compile
 Sin preguntas interactivas: arma la URL como `http://SERVER_HOST:PORT`,
 lee `CLIENT_TOKEN` de `worker/.env` si existe, y genera en
 `cli/dist-bin/` tres binarios con esa URL/token **ya embebidos como
-default** (igual que el workflow de releases inyecta el token compartido)
-— no hace falta copiar ningún archivo de configuración aparte:
+default** — no hace falta copiar ningún archivo de configuración aparte:
 
 - `lexema-linux-x64`
 - `lexema-linux-arm64`
@@ -234,58 +231,38 @@ git push -u origin main
 > El servidor (`worker/`) puede vivir en el mismo repo (como aquí) o en uno
 > aparte; no afecta el resto de la guía.
 
-## 5. Publicar binarios automáticamente (GitHub Actions)
+## 5. Distribuir la CLI desde tu propio servidor (GET /install)
 
-El workflow en `.github/workflows/release.yml` ya está listo: compila la CLI
-para Linux, macOS (Intel y Apple Silicon) y Windows, y sube los binarios a un
-Release cada vez que subes un tag `vX.Y.Z`.
-
-```bash
-git tag v1.0.0
-git push origin v1.0.0
-```
-
-Ve a la pestaña **Actions** de tu repo para ver el progreso, y a
-**Releases** cuando termine. Deberías obtener 4 archivos:
-
-- `lexema-linux-x64`
-- `lexema-macos-x64`
-- `lexema-macos-arm64`
-- `lexema-win-x64.exe`
-
-Nota: los binarios de macOS se compilan en un runner `macos-latest` y se
-firman con `codesign --sign -` (firma ad-hoc). Si los compilas tú mismo en
-Linux en vez de usar el workflow, macOS matará el ejecutable al abrirlo a
-menos que lo firmes desde un Mac o instales la utilidad `ldid`.
-
-## 6. Publicar el instalador en tu propio dominio (opcional)
-
-Si no quieres depender de una URL de `github.com`, puedes servir
-`install.sh`/`install.ps1` desde cualquier hosting estático que ya tengas
-(por ejemplo, un sitio en Cloudflare Pages). `install.sh` e `install.ps1` ya
-apuntan a `diegoabdo/lexema-cli` como repositorio de releases.
-
-Copia ambos archivos a la raíz de ese sitio y haz push; una vez desplegado
-quedarán disponibles en tu dominio, por ejemplo:
-
-```
-https://tu-dominio.com/install.sh
-https://tu-dominio.com/install.ps1
-```
-
-Tus usuarios podrán instalar con:
+La distribución es autoalojada: el mismo server sirve los binarios que
+compila `make compile` y genera el instalador según el OS de quien la pida.
 
 ```bash
-# Linux / macOS
-curl -fsSL https://tu-dominio.com/install.sh | bash
+# Linux (autodetecta x64/arm64)
+curl -fsSL http://<ip-servidor>:8787/install | sh
 
-# Windows (PowerShell)
-irm https://tu-dominio.com/install.ps1 | iex
+# Windows (PowerShell, sin admin)
+irm http://<ip-servidor>:8787/install.ps1 | iex
 ```
 
-Si prefieres no usar un dominio propio, tus usuarios también pueden descargar
-los binarios directamente desde
-`https://github.com/diegoabdo/lexema-cli/releases`.
+Qué hace cada pieza:
+
+| Endpoint | Qué entrega |
+|---|---|
+| `GET /install` (alias `/install.sh`) | Script sh generado al vuelo: detecta `uname` (linux-x64 / linux-arm64), baja el binario y lo deja en `/usr/local/bin/lexema` (con `sudo` si hace falta) |
+| `GET /install.ps1` | Script PowerShell: baja `lexema.exe` a `%LOCALAPPDATA%\Programs\lexema` y lo agrega al PATH de usuario |
+| `GET /install/binary?os=` | El binario en crudo (`linux-x64`, `linux-arm64`, `windows-x64`) |
+
+Detalles:
+
+- Si hay `CLIENT_TOKEN` en el server, el curl necesita el header
+  (`-H "Authorization: Bearer <token>"` en Linux, `-Headers @{Authorization='Bearer <token>'}`
+  en PowerShell), pero el script ya lleva el token embebido para la descarga
+  del binario: un solo comando instala todo funcionando.
+- Sin binario compilado, los endpoints responden 404 con instrucciones.
+- El log de arranque del server muestra qué binarios tiene disponibles por OS
+  (`Instalador CLI (linux-x64): ...`).
+- `INSTALL_FILE` en el `.env` fuerza un único archivo para todos los OS
+  (útil si subís un ejecutable compilado a una ruta cualquiera de la VM).
 
 Y luego usar:
 
