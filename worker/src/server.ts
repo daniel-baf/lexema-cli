@@ -51,16 +51,28 @@ class MemoryKV implements KVLike {
   }
 }
 
-async function toWebRequest(req: http.IncomingMessage): Promise<Request> {
+// realIp viene del socket TCP, no de un header: no hay Cloudflare por
+// delante, así que es la única fuente de IP que un cliente no puede
+// falsear. Se inyecta como header interno DESPUÉS de copiar los headers
+// originales, pisando cualquier x-lexema-real-ip que el cliente mande.
+export async function toWebRequest(req: http.IncomingMessage, realIp: string): Promise<Request> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) chunks.push(chunk as Buffer);
   const body = chunks.length ? Buffer.concat(chunks) : undefined;
   const host = (req.headers.host as string) || 'localhost';
+  const headers = { ...(req.headers as Record<string, string>), 'x-lexema-real-ip': realIp };
   return new Request(`http://${host}${req.url}`, {
     method: req.method,
-    headers: req.headers as Record<string, string>,
+    headers,
     body: ['GET', 'HEAD', 'OPTIONS'].includes(req.method || '') ? undefined : body,
   });
+}
+
+// Log simple por request: sirve para ver en la terminal quién se conecta
+// mientras corre "npm run dev". Nunca incluye Authorization ni el body
+// (podrían traer el token o el prompt del usuario).
+function logRequest(method: string, urlPath: string, status: number, ms: number, ip: string): void {
+  console.log(`[${new Date().toISOString()}] ${method} ${urlPath} ${status} ${ms}ms ip=${ip}`);
 }
 
 async function sendWebResponse(res: http.ServerResponse, webRes: Response): Promise<void> {
@@ -165,8 +177,12 @@ function main(): void {
   };
 
   const server = http.createServer(async (req, res) => {
+    const start = Date.now();
+    const realIp = req.socket.remoteAddress || 'local';
+    const method = req.method || 'GET';
+    const urlPath = req.url || '/';
     try {
-      const webReq = await toWebRequest(req);
+      const webReq = await toWebRequest(req, realIp);
       const platform = new URL(webReq.url).searchParams.get('platform') || '';
       const webRes = await handleRequest(
         webReq,
@@ -176,10 +192,12 @@ function main(): void {
         makeInstallBinarySource()
       );
       await sendWebResponse(res, webRes);
+      logRequest(method, urlPath, webRes.status, Date.now() - start, realIp);
     } catch (err) {
       console.error(err);
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Error procesando la petición' }));
+      logRequest(method, urlPath, 500, Date.now() - start, realIp);
     }
   });
 
@@ -189,7 +207,9 @@ function main(): void {
     console.log(`Modelo por defecto: ${cfg.defaultModel}`);
     console.log(`API key: ${cfg.apiKey ? 'configurada' : pcRed('FALTA (revisa tu .env)')}`);
     console.log(`Auth (CLIENT_TOKEN): ${cfg.clientToken ? 'activada' : 'desactivada'}`);
-    console.log(`Endpoints: POST /  ·  GET /models  ·  GET /health  ·  GET /download  ·  GET /install`);
+    console.log(
+      `Endpoints: POST /  ·  GET /models  ·  GET /health  ·  GET /download  ·  GET /install  ·  GET /uninstall  ·  GET /uninstall.ps1`
+    );
     console.log(
       `Updater: linux -> ${UPDATER_FILES.linux}  ·  win32 -> ${UPDATER_FILES.win32}  ·  fallback -> ${FALLBACK_UPDATER}`
     );

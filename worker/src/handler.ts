@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { ResolvedConfig } from './config';
 import { getProvider } from './ai';
 import { ProviderError } from './ai/types';
@@ -45,6 +46,20 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
+function sha256Hex(bytes: Uint8Array): string {
+  return crypto.createHash('sha256').update(bytes).digest('hex');
+}
+
+// Comparación de token en tiempo constante: timingSafeEqual exige buffers
+// de igual longitud, así que un largo distinto ya es "no autorizado" sin
+// necesidad de comparar byte a byte (ahí no hay señal de timing útil).
+function tokensMatch(received: string, expected: string): boolean {
+  const a = Buffer.from(received);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
 function rateLimited(ip: string, kv: KVLike, dailyLimit: number): Promise<Response | null> {
   return (async () => {
     const dayKey = `rl:${ip}:${new Date().toISOString().slice(0, 10)}`;
@@ -64,7 +79,11 @@ function rateLimited(ip: string, kv: KVLike, dailyLimit: number): Promise<Respon
 // binario que corresponda de /install/binary?os=... Deja el binario en
 // /usr/local/bin (con sudo si hace falta) y avisa si no está en el PATH.
 // Windows no pasa por acá: usa GET /install.ps1 (irm | iex).
-function buildInstallScript(origin: string, token?: string): string {
+function buildInstallScript(
+  origin: string,
+  token?: string,
+  hashes: { 'linux-x64'?: string; 'linux-arm64'?: string } = {}
+): string {
   const authCurl = token ? `-H "Authorization: Bearer ${token}" ` : '';
   const authWget = token ? `--header="Authorization: Bearer ${token}" ` : '';
   return `#!/bin/sh
@@ -84,6 +103,13 @@ case "\$(uname -s)-\$(uname -m)" in
      exit 1 ;;
 esac
 
+# Hash esperado por arquitectura, calculado por el servidor al generar este
+# script (evita una segunda lectura del binario para chequear integridad).
+case "\$OS" in
+  linux-x64) EXPECTED_SHA256="${hashes['linux-x64'] || ''}" ;;
+  linux-arm64) EXPECTED_SHA256="${hashes['linux-arm64'] || ''}" ;;
+esac
+
 fetch() { # $1=url $2=destino
   if command -v curl >/dev/null 2>&1; then
     curl -fsSL ${authCurl}-o "$2" "$1"
@@ -100,6 +126,23 @@ trap 'rm -f "\$TMP"' EXIT
 
 echo "Detectado \$OS — descargando Lexema CLI desde \$SERVER..."
 fetch "\$SERVER/install/binary?os=\$OS" "\$TMP"
+
+echo "Verificando integridad (SHA-256)..."
+if command -v sha256sum >/dev/null 2>&1; then
+  ACTUAL_SHA256="\$(sha256sum "\$TMP" | cut -d ' ' -f1)"
+elif command -v shasum >/dev/null 2>&1; then
+  ACTUAL_SHA256="\$(shasum -a 256 "\$TMP" | cut -d ' ' -f1)"
+else
+  echo "No se encontró sha256sum ni shasum: no se puede verificar la integridad del binario." >&2
+  exit 1
+fi
+if [ "\$ACTUAL_SHA256" != "\$EXPECTED_SHA256" ]; then
+  echo "✖ Verificación de integridad fallida: el binario descargado no coincide con el esperado." >&2
+  echo "  Esperado: \$EXPECTED_SHA256" >&2
+  echo "  Obtenido: \$ACTUAL_SHA256" >&2
+  exit 1
+fi
+
 chmod +x "\$TMP"
 
 if [ -w "\$INSTALL_DIR" ]; then
@@ -121,7 +164,7 @@ echo "Probá: \$BIN_NAME models"
 // Contraparte de /install para Windows: script PowerShell que baja el .exe
 // de /install/binary?os=windows-x64 y lo deja en un directorio del PATH de
 // usuario (sin pedir admin). Uso: irm <servidor>/install.ps1 | iex
-function buildInstallScriptPs(origin: string, token?: string): string {
+function buildInstallScriptPs(origin: string, token?: string, expectedSha256?: string): string {
   const authLine = token ? `\n$headers.Authorization = "Bearer ${token}"` : '';
   return `# Instalador de Lexema CLI (Windows) — servido por el propio servidor Lexema.
 # Uso: irm ${origin}/install.ps1 | iex
@@ -131,12 +174,21 @@ $ProgressPreference = "SilentlyContinue"
 $Server = "${origin}"
 $Dir = "$env:LOCALAPPDATA\\Programs\\lexema"
 $headers = @{}${authLine}
+$ExpectedSha256 = "${expectedSha256 || ''}"
 
 New-Item -ItemType Directory -Force -Path $Dir | Out-Null
 $Tmp = Join-Path $env:TEMP "lexema-install.exe"
 
 Write-Host "Descargando Lexema CLI (windows-x64) desde $Server..."
 Invoke-WebRequest -Uri "$Server/install/binary?os=windows-x64" -OutFile $Tmp -Headers $headers -UseBasicParsing
+
+Write-Host "Verificando integridad (SHA-256)..."
+$ActualSha256 = (Get-FileHash -Path $Tmp -Algorithm SHA256).Hash
+if ($ActualSha256.ToLower() -ne $ExpectedSha256.ToLower()) {
+  Remove-Item -Force $Tmp -ErrorAction SilentlyContinue
+  Write-Error "Verificacion de integridad fallida. Esperado: $ExpectedSha256 - Obtenido: $ActualSha256"
+  exit 1
+}
 
 $Dest = Join-Path $Dir "lexema.exe"
 Move-Item -Force $Tmp $Dest
@@ -151,6 +203,61 @@ if (($env:Path -split ';') -notcontains $Dir) {
 }
 
 Write-Host "OK Lexema CLI instalado en $Dest — proba: lexema models"
+`;
+}
+
+// Contraparte de /install para borrar la CLI. A diferencia del instalador,
+// no depende de binarios en el servidor (no llama a installBinary) y no
+// toca ~/.lexema: un script vía "curl | sh" no debería borrar datos de
+// usuario sin confirmación interactiva explícita, así que solo informa
+// cómo hacerlo a mano.
+function buildUninstallScript(): string {
+  return `#!/bin/sh
+# Desinstalador de Lexema CLI (Linux) — servido por el propio servidor Lexema.
+# Uso: curl -fsSL <servidor>/uninstall | sh
+set -e
+
+BIN_PATH="/usr/local/bin/lexema"
+CONFIG_DIR="\$HOME/.lexema"
+
+if [ ! -e "\$BIN_PATH" ]; then
+  echo "No se encontró Lexema CLI en \$BIN_PATH" >&2
+  exit 1
+fi
+
+if [ -w "\$BIN_PATH" ]; then
+  rm -f "\$BIN_PATH"
+else
+  echo "Se requieren permisos de administrador para borrar \$BIN_PATH" >&2
+  sudo rm -f "\$BIN_PATH"
+fi
+
+echo "✔ Lexema CLI desinstalado (\$BIN_PATH)"
+echo "Tu configuración sigue en \$CONFIG_DIR — borrala manualmente con: rm -rf \$CONFIG_DIR"
+`;
+}
+
+function buildUninstallScriptPs(): string {
+  return `# Desinstalador de Lexema CLI (Windows) — servido por el propio servidor Lexema.
+# Uso: irm <servidor>/uninstall.ps1 | iex
+$ErrorActionPreference = "Stop"
+
+$Dir = "$env:LOCALAPPDATA\\Programs\\lexema"
+$Dest = Join-Path $Dir "lexema.exe"
+$ConfigDir = Join-Path $env:USERPROFILE ".lexema"
+
+if (-not (Test-Path $Dest)) {
+  Write-Error "No se encontró Lexema CLI en $Dest"
+  exit 1
+}
+
+Remove-Item -Force $Dest
+if ((Test-Path $Dir) -and ((Get-ChildItem $Dir -Force | Measure-Object).Count -eq 0)) {
+  Remove-Item -Force $Dir
+}
+
+Write-Host "OK Lexema CLI desinstalado ($Dest)"
+Write-Host "Tu configuracion sigue en $ConfigDir - borrala manualmente si queres: Remove-Item -Recurse -Force $ConfigDir"
 `;
 }
 
@@ -174,7 +281,7 @@ export async function handleRequest(
   if (cfg.clientToken) {
     const auth = request.headers.get('Authorization') || '';
     const token = auth.replace(/^Bearer\s+/i, '');
-    if (token !== cfg.clientToken) {
+    if (!tokensMatch(token, cfg.clientToken)) {
       return json({ error: 'No autorizado' }, 401);
     }
   }
@@ -247,10 +354,9 @@ export async function handleRequest(
   // GET /install/binary?os=... el binario compilado. Comparten la
   // autenticación global de arriba.
   if (request.method === 'GET' && (path === '/install' || path === '/install.sh')) {
-    const available =
-      installBinary &&
-      ((await installBinary('linux-x64')) || (await installBinary('windows-x64')));
-    if (!available) {
+    const linuxX64 = installBinary ? await installBinary('linux-x64') : null;
+    const linuxArm64 = installBinary ? await installBinary('linux-arm64') : null;
+    if (!linuxX64 && !linuxArm64) {
       return json(
         {
           error:
@@ -259,14 +365,23 @@ export async function handleRequest(
         404
       );
     }
-    return new Response(buildInstallScript(new URL(request.url).origin, cfg.clientToken), {
-      status: 200,
-      headers: {
-        'Content-Type': 'text/x-shellscript; charset=utf-8',
-        'Cache-Control': 'no-store',
-        ...corsHeaders(),
-      },
-    });
+    // Reusamos los bytes ya leídos por installBinary para calcular el
+    // checksum, en vez de leer el archivo de disco una segunda vez.
+    const hashes = {
+      'linux-x64': linuxX64 ? sha256Hex(linuxX64.bytes) : undefined,
+      'linux-arm64': linuxArm64 ? sha256Hex(linuxArm64.bytes) : undefined,
+    };
+    return new Response(
+      buildInstallScript(new URL(request.url).origin, cfg.clientToken, hashes),
+      {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/x-shellscript; charset=utf-8',
+          'Cache-Control': 'no-store',
+          ...corsHeaders(),
+        },
+      }
+    );
   }
 
   if (request.method === 'GET' && path === '/install.ps1') {
@@ -280,7 +395,34 @@ export async function handleRequest(
         404
       );
     }
-    return new Response(buildInstallScriptPs(new URL(request.url).origin, cfg.clientToken), {
+    return new Response(
+      buildInstallScriptPs(new URL(request.url).origin, cfg.clientToken, sha256Hex(binary.bytes)),
+      {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'Cache-Control': 'no-store',
+          ...corsHeaders(),
+        },
+      }
+    );
+  }
+
+  // Desinstalador remoto: simétrico a /install pero no depende de binarios
+  // en disco (nada que servir), así que nunca responde 404 por eso.
+  if (request.method === 'GET' && (path === '/uninstall' || path === '/uninstall.sh')) {
+    return new Response(buildUninstallScript(), {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/x-shellscript; charset=utf-8',
+        'Cache-Control': 'no-store',
+        ...corsHeaders(),
+      },
+    });
+  }
+
+  if (request.method === 'GET' && path === '/uninstall.ps1') {
+    return new Response(buildUninstallScriptPs(), {
       status: 200,
       headers: {
         'Content-Type': 'text/plain; charset=utf-8',
@@ -311,9 +453,12 @@ export async function handleRequest(
     return json({ error: 'Método no permitido' }, 405);
   }
 
-  // Rate limiting opcional por IP (KV en memoria del servidor local).
+  // Rate limiting opcional por IP (KV en memoria del servidor local). Ya no
+  // hay Cloudflare por delante, así que la IP real viene del header interno
+  // que server.ts setea desde el socket TCP (x-lexema-real-ip), pisando
+  // cualquier valor que el cliente intente mandar con ese mismo nombre.
   if (kv) {
-    const ip = request.headers.get('CF-Connecting-IP') || 'local';
+    const ip = request.headers.get('x-lexema-real-ip') || 'local';
     const limited = await rateLimited(ip, kv, cfg.dailyLimit);
     if (limited) return limited;
   }

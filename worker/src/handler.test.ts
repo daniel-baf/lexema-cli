@@ -99,6 +99,44 @@ describe('handleRequest', () => {
     expect(res.status).toBe(200);
   });
 
+  it('token de distinta longitud al esperado devuelve 401 (sin comparar byte a byte)', async () => {
+    const cfg = baseConfig({ clientToken: 'secret' });
+    const res = await handleRequest(
+      postRequest({ prompt: 'hola' }, { Authorization: 'Bearer sec' }),
+      cfg
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it('token con la misma longitud pero distinto contenido devuelve 401', async () => {
+    const cfg = baseConfig({ clientToken: 'secret' });
+    const res = await handleRequest(
+      postRequest({ prompt: 'hola' }, { Authorization: 'Bearer zzzzzz' }),
+      cfg
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it('el rate limit usa x-lexema-real-ip, no CF-Connecting-IP (no es spoofeable por el cliente)', async () => {
+    const cfg = baseConfig({ dailyLimit: 1 });
+    const kv = new MemoryKV();
+    getProvider.mockReturnValue({ provider: { complete: vi.fn().mockResolvedValue('ok') } });
+    // Dos IPs de CF-Connecting-IP distintas mandadas por el "cliente", pero
+    // ambos requests comparten la misma x-lexema-real-ip real: deben
+    // compartir el mismo contador y el segundo debe ser limitado.
+    await handleRequest(
+      postRequest({ prompt: 'uno' }, { 'CF-Connecting-IP': '1.1.1.1', 'x-lexema-real-ip': '9.9.9.9' }),
+      cfg,
+      kv
+    );
+    const res = await handleRequest(
+      postRequest({ prompt: 'dos' }, { 'CF-Connecting-IP': '2.2.2.2', 'x-lexema-real-ip': '9.9.9.9' }),
+      cfg,
+      kv
+    );
+    expect(res.status).toBe(429);
+  });
+
   it('supera el límite diario del KV -> 429', async () => {
     const cfg = baseConfig({ dailyLimit: 1 });
     const kv = new MemoryKV();
@@ -225,6 +263,8 @@ describe('GET /download', () => {
 
 describe('GET /install', () => {
   const binarySource = vi.fn().mockResolvedValue({ bytes: new Uint8Array([1]), filename: 'lexema' });
+  // sha256 de un único byte 0x01, para verificar el hash embebido.
+  const SHA256_OF_BYTE_1 = '4bf5122f344554c53bde2ebb8cd2b7e3d1600ad631c385a5d7cce23c7785459a';
 
   it('sin binario en el servidor devuelve 404', async () => {
     const res = await handleRequest(new Request('http://localhost/install'), baseConfig());
@@ -246,6 +286,23 @@ describe('GET /install', () => {
     expect(script).toContain('Linux-x86_64) OS="linux-x64"');
     expect(script).toContain('$SERVER/install/binary?os=$OS');
     expect(script).not.toContain('Authorization');
+  });
+
+  it('embebe el checksum SHA-256 del binario y verifica antes de instalar', async () => {
+    const res = await handleRequest(
+      new Request('http://mi-vm:8787/install'),
+      baseConfig(),
+      undefined,
+      undefined,
+      binarySource
+    );
+    const script = await res.text();
+    expect(script).toContain(`linux-x64) EXPECTED_SHA256="${SHA256_OF_BYTE_1}"`);
+    expect(script).toContain(`linux-arm64) EXPECTED_SHA256="${SHA256_OF_BYTE_1}"`);
+    expect(script).toContain('sha256sum');
+    expect(script).toContain('shasum -a 256');
+    expect(script).toContain('Verificación de integridad fallida');
+    expect(script).toContain('exit 1');
   });
 
   it('con CLIENT_TOKEN embebe el header en el script', async () => {
@@ -310,6 +367,53 @@ describe('GET /install.ps1', () => {
     );
     const script = await res.text();
     expect(script).toContain('$headers.Authorization = "Bearer secreto"');
+  });
+
+  it('embebe el checksum SHA-256 del .exe y verifica antes de mover', async () => {
+    const res = await handleRequest(
+      new Request('http://mi-vm:8787/install.ps1'),
+      baseConfig(),
+      undefined,
+      undefined,
+      winSource
+    );
+    const script = await res.text();
+    expect(script).toContain('$ExpectedSha256 = "4bf5122f344554c53bde2ebb8cd2b7e3d1600ad631c385a5d7cce23c7785459a"');
+    expect(script).toContain('Get-FileHash -Path $Tmp -Algorithm SHA256');
+  });
+});
+
+describe('GET /uninstall', () => {
+  it('devuelve el script sh sin depender de binarios en el servidor', async () => {
+    const res = await handleRequest(new Request('http://localhost/uninstall'), baseConfig());
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toContain('shellscript');
+    const script = await res.text();
+    expect(script).toContain('BIN_PATH="/usr/local/bin/lexema"');
+    expect(script).toContain('rm -f "$BIN_PATH"');
+  });
+
+  it('/uninstall.sh es alias de /uninstall', async () => {
+    const res = await handleRequest(new Request('http://localhost/uninstall.sh'), baseConfig());
+    expect(res.status).toBe(200);
+  });
+
+  it('exige el CLIENT_TOKEN como el resto de endpoints', async () => {
+    const res = await handleRequest(
+      new Request('http://localhost/uninstall'),
+      baseConfig({ clientToken: 'secreto' })
+    );
+    expect(res.status).toBe(401);
+  });
+});
+
+describe('GET /uninstall.ps1', () => {
+  it('devuelve el script PowerShell sin depender de binarios en el servidor', async () => {
+    const res = await handleRequest(new Request('http://localhost/uninstall.ps1'), baseConfig());
+    expect(res.status).toBe(200);
+    const script = await res.text();
+    expect(script).toContain('Programs\\lexema');
+    expect(script).toContain('Remove-Item -Force $Dest');
   });
 });
 
