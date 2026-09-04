@@ -5,7 +5,10 @@
 //   PORT=3000 npm run dev
 import http from 'node:http';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import path from 'node:path';
+import { pipeline } from 'node:stream/promises';
+import { Readable } from 'node:stream';
 import { handleRequest, KVLike, UpdateFile } from './handler';
 import { resolveConfig } from './config';
 
@@ -75,13 +78,35 @@ function logRequest(method: string, urlPath: string, status: number, ms: number,
   console.log(`[${new Date().toISOString()}] ${method} ${urlPath} ${status} ${ms}ms ip=${ip}`);
 }
 
-async function sendWebResponse(res: http.ServerResponse, webRes: Response): Promise<void> {
+// Streamea la respuesta en vez de bufferizarla entera: crítico para
+// /download y /install/binary (binarios grandes), y funciona igual para
+// JSON porque su .body también es un stream de un solo chunk.
+export async function sendWebResponse(res: http.ServerResponse, webRes: Response): Promise<void> {
   const headers: Record<string, string> = {};
   webRes.headers.forEach((v, k) => {
     headers[k] = v;
   });
   res.writeHead(webRes.status, headers);
-  res.end(Buffer.from(await webRes.arrayBuffer()));
+  if (webRes.body) {
+    await pipeline(Readable.fromWeb(webRes.body as import('node:stream/web').ReadableStream), res);
+  } else {
+    res.end();
+  }
+}
+
+// Cache de hash SHA-256 por archivo, a nivel de módulo (vive mientras el
+// proceso del server esté arriba). Evita releer y rehashear el binario en
+// cada request a /install: solo recalcula si mtimeMs cambió (nuevo deploy).
+const hashCache = new Map<string, { mtimeMs: number; hash: string }>();
+
+export async function getCachedHash(file: string): Promise<string> {
+  const stat = await fs.promises.stat(file);
+  const cached = hashCache.get(file);
+  if (cached && cached.mtimeMs === stat.mtimeMs) return cached.hash;
+  const bytes = await fs.promises.readFile(file);
+  const hash = crypto.createHash('sha256').update(bytes).digest('hex');
+  hashCache.set(file, { mtimeMs: stat.mtimeMs, hash });
+  return hash;
 }
 
 function main(): void {
@@ -176,6 +201,16 @@ function main(): void {
     }
   };
 
+  const makeInstallHashSource = () => async (os: string): Promise<string | null> => {
+    const file = resolveCliBinary(os);
+    if (!file) return null;
+    try {
+      return await getCachedHash(file);
+    } catch {
+      return null;
+    }
+  };
+
   const server = http.createServer(async (req, res) => {
     const start = Date.now();
     const realIp = req.socket.remoteAddress || 'local';
@@ -189,7 +224,8 @@ function main(): void {
         cfg,
         kv,
         makeUpdateFileSource(platform),
-        makeInstallBinarySource()
+        makeInstallBinarySource(),
+        makeInstallHashSource()
       );
       await sendWebResponse(res, webRes);
       logRequest(method, urlPath, webRes.status, Date.now() - start, realIp);

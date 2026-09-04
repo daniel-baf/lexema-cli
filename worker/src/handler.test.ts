@@ -17,6 +17,7 @@ function baseConfig(overrides: Partial<ResolvedConfig> = {}): ResolvedConfig {
     clientToken: undefined,
     maxPromptLength: 4000,
     dailyLimit: 100,
+    aiTimeoutMs: 30000,
     ...overrides,
   };
 }
@@ -190,6 +191,7 @@ describe('handleRequest', () => {
       apiKey: 'sk-test',
       baseUrl: 'https://api.example.com',
       systemPrompt: undefined,
+      timeoutMs: 30000,
     });
   });
 
@@ -319,6 +321,37 @@ describe('GET /install', () => {
     expect(script).toContain('Authorization: Bearer secreto');
   });
 
+  it('usa el hash de installHash (cacheado) en vez de recalcularlo de los bytes', async () => {
+    const installHash = vi.fn().mockResolvedValue('hash-cacheado');
+    const res = await handleRequest(
+      new Request('http://mi-vm:8787/install'),
+      baseConfig(),
+      undefined,
+      undefined,
+      binarySource,
+      installHash
+    );
+    const script = await res.text();
+    expect(installHash).toHaveBeenCalledWith('linux-x64');
+    expect(installHash).toHaveBeenCalledWith('linux-arm64');
+    expect(script).toContain('linux-x64) EXPECTED_SHA256="hash-cacheado"');
+    expect(script).toContain('linux-arm64) EXPECTED_SHA256="hash-cacheado"');
+  });
+
+  it('si installHash devuelve null, cae a calcular el hash de los bytes', async () => {
+    const installHash = vi.fn().mockResolvedValue(null);
+    const res = await handleRequest(
+      new Request('http://mi-vm:8787/install'),
+      baseConfig(),
+      undefined,
+      undefined,
+      binarySource,
+      installHash
+    );
+    const script = await res.text();
+    expect(script).toContain(`linux-x64) EXPECTED_SHA256="${SHA256_OF_BYTE_1}"`);
+  });
+
   it('/install.sh es alias de /install', async () => {
     const res = await handleRequest(
       new Request('http://localhost/install.sh'),
@@ -353,6 +386,21 @@ describe('GET /install.ps1', () => {
     expect(script).toContain('$Server = "http://mi-vm:8787"');
     expect(script).toContain('install/binary?os=windows-x64');
     expect(script).not.toContain('Authorization');
+  });
+
+  it('usa el hash de installHash para windows-x64 en vez de recalcularlo', async () => {
+    const installHash = vi.fn().mockResolvedValue('hash-win-cacheado');
+    const res = await handleRequest(
+      new Request('http://mi-vm:8787/install.ps1'),
+      baseConfig(),
+      undefined,
+      undefined,
+      winSource,
+      installHash
+    );
+    const script = await res.text();
+    expect(installHash).toHaveBeenCalledWith('windows-x64');
+    expect(script).toContain('$ExpectedSha256 = "hash-win-cacheado"');
   });
 
   it('con CLIENT_TOKEN embebe el header en el script', async () => {

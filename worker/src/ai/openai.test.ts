@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { openaiProvider } from './openai';
 import { ProviderError } from './types';
 
-const ctx = { apiKey: 'sk-test', baseUrl: 'https://api.example.com' };
+const ctx = { apiKey: 'sk-test', baseUrl: 'https://api.example.com', timeoutMs: 30000 };
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status });
@@ -36,6 +36,69 @@ describe('openaiProvider.complete', () => {
     vi.mocked(fetch).mockResolvedValue(jsonResponse(200, {}));
     const reply = await openaiProvider.complete('hi', 'gpt-4', ctx);
     expect(reply).toBe('Sin respuesta del modelo.');
+  });
+
+  it('devuelve el contenido vacío tal cual, sin caer al mensaje por defecto', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      jsonResponse(200, { choices: [{ message: { content: '' } }] })
+    );
+    const reply = await openaiProvider.complete('hi', 'gpt-4', ctx);
+    expect(reply).toBe('');
+  });
+
+  it('lanza ProviderError si res.json() falla al parsear', async () => {
+    const badRes = new Response('not json', { status: 200 });
+    vi.spyOn(badRes, 'json').mockRejectedValue(new SyntaxError('Unexpected token'));
+    vi.mocked(fetch).mockResolvedValue(badRes);
+    await expect(openaiProvider.complete('hi', 'gpt-4', ctx)).rejects.toBeInstanceOf(
+      ProviderError
+    );
+  });
+
+  it('lanza ProviderError en fallas de red/DNS del fetch (no propaga la excepción cruda)', async () => {
+    vi.mocked(fetch).mockRejectedValue(new TypeError('fetch failed'));
+    await expect(openaiProvider.complete('hi', 'gpt-4', ctx)).rejects.toBeInstanceOf(
+      ProviderError
+    );
+  });
+
+  it('lanza ProviderError 504 si el proveedor no responde a tiempo', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(fetch).mockImplementation(
+        (_url, init) =>
+          new Promise((_resolve, reject) => {
+            const signal = (init as RequestInit)?.signal;
+            signal?.addEventListener('abort', () => {
+              const err = new Error('aborted');
+              err.name = 'AbortError';
+              reject(err);
+            });
+          })
+      );
+      const pending = openaiProvider.complete('hi', 'gpt-4', { ...ctx, timeoutMs: 1000 });
+      const assertion = expect(pending).rejects.toMatchObject({
+        status: 504,
+        message: 'El proveedor de IA no respondió a tiempo.',
+      });
+      await vi.advanceTimersByTimeAsync(1000);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('no aborta si el fetch resuelve antes del timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(fetch).mockResolvedValue(
+        jsonResponse(200, { choices: [{ message: { content: 'rápido' } }] })
+      );
+      const reply = await openaiProvider.complete('hi', 'gpt-4', { ...ctx, timeoutMs: 1000 });
+      expect(reply).toBe('rápido');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('lanza ProviderError 429 en cuota agotada', async () => {

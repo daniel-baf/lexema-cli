@@ -22,6 +22,12 @@ export type UpdateFileSource = () => Promise<UpdateFile | null>;
 // si no hay binario para ese OS devuelve null y /install responde 404.
 export type InstallBinarySource = (os: string) => Promise<UpdateFile | null>;
 
+// Fuente del hash SHA-256 del binario de instalación, cacheado por mtime en
+// server.ts (evita recalcular el hash en cada request a /install). Si no se
+// pasa (o devuelve null), las rutas de /install caen a sha256Hex(bytes) leído
+// de installBinary, sin romper la firma opcional de handleRequest.
+export type InstallHashSource = (os: string) => Promise<string | null>;
+
 // Valores válidos del parámetro ?os= de /install/binary: coinciden con los
 // binarios que genera "make compile" (ver scripts/compile.mjs).
 const OS_KEYS = ['linux-x64', 'linux-arm64', 'windows-x64'];
@@ -267,7 +273,8 @@ export async function handleRequest(
   cfg: ResolvedConfig,
   kv?: KVLike,
   updateFile?: UpdateFileSource,
-  installBinary?: InstallBinarySource
+  installBinary?: InstallBinarySource,
+  installHash?: InstallHashSource
 ): Promise<Response> {
   if (request.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders() });
@@ -365,11 +372,16 @@ export async function handleRequest(
         404
       );
     }
-    // Reusamos los bytes ya leídos por installBinary para calcular el
-    // checksum, en vez de leer el archivo de disco una segunda vez.
+    // installHash usa el hash cacheado por mtime (server.ts); si no está
+    // disponible caemos a calcularlo de los bytes ya leídos por installBinary,
+    // sin leer el archivo de disco una segunda vez.
     const hashes = {
-      'linux-x64': linuxX64 ? sha256Hex(linuxX64.bytes) : undefined,
-      'linux-arm64': linuxArm64 ? sha256Hex(linuxArm64.bytes) : undefined,
+      'linux-x64': linuxX64
+        ? (installHash && (await installHash('linux-x64'))) || sha256Hex(linuxX64.bytes)
+        : undefined,
+      'linux-arm64': linuxArm64
+        ? (installHash && (await installHash('linux-arm64'))) || sha256Hex(linuxArm64.bytes)
+        : undefined,
     };
     return new Response(
       buildInstallScript(new URL(request.url).origin, cfg.clientToken, hashes),
@@ -395,8 +407,9 @@ export async function handleRequest(
         404
       );
     }
+    const winHash = (installHash && (await installHash('windows-x64'))) || sha256Hex(binary.bytes);
     return new Response(
-      buildInstallScriptPs(new URL(request.url).origin, cfg.clientToken, sha256Hex(binary.bytes)),
+      buildInstallScriptPs(new URL(request.url).origin, cfg.clientToken, winHash),
       {
         status: 200,
         headers: {
@@ -506,6 +519,7 @@ export async function handleRequest(
       apiKey: cfg.apiKey,
       baseUrl: cfg.baseUrl,
       systemPrompt: cfg.systemPrompt,
+      timeoutMs: cfg.aiTimeoutMs,
     });
     return json({ reply, model });
   } catch (err) {

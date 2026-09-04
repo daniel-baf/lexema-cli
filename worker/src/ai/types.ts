@@ -2,6 +2,7 @@ export interface ProviderContext {
   apiKey: string;
   baseUrl: string;
   systemPrompt?: string;
+  timeoutMs: number;
 }
 
 export interface AIProvider {

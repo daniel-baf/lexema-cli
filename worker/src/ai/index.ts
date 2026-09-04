@@ -26,9 +26,8 @@ export function getProvider(name?: string): { provider: AIProvider; aliasBaseUrl
   }
   const provider = PROVIDERS[raw];
   if (provider) return { provider };
-  throw new Error(
-    `Proveedor desconocido: "${raw}". Valores soportados: openai, openrouter, groq.`
-  );
+  const supported = [...new Set([...listProviderIds(), ...Object.keys(ALIASES)])];
+  throw new Error(`Proveedor desconocido: "${raw}". Valores soportados: ${supported.join(', ')}.`);
 }
 
 export function listProviderIds(): string[] {
