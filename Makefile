@@ -4,7 +4,10 @@
 
 SCRIPTS := scripts
 
-.PHONY: help install env server up use-local use-lan build compile cli ask chat models config typecheck lint test demo clean
+.PHONY: help install env server up use-local use-lan build compile cli ask chat models config typecheck lint test demo clean sync sync-up sync-down sync-status
+
+SYNC_BUCKET := gs://precise-blend-428821-e0-lexema-sync
+SYNC_ENV_REMOTE := $(SYNC_BUCKET)/env/.env
 
 help: ## Lista los comandos disponibles
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -83,3 +86,24 @@ demo: ## Solo el demo del flujo canónico con .env
 
 clean: ## Borra artefactos de compilación
 	rm -rf cli/dist cli/dist-bin
+
+sync: sync-status ## Alias de sync-status: muestra si local/bucket están desincronizados
+
+sync-up: ## Sube worker/.env al bucket temporal (para que otra VM lo baje)
+	@test -f worker/.env || { echo "Falta worker/.env. Corre primero: make env"; exit 1; }
+	@gcloud storage cp worker/.env $(SYNC_ENV_REMOTE)
+	@echo "→ Subido a $(SYNC_ENV_REMOTE)"
+
+sync-down: ## Baja worker/.env del bucket temporal (hace backup del local si existe)
+	@if [ -f worker/.env ]; then \
+		cp worker/.env worker/.env.bak.$$(date +%Y%m%d%H%M%S); \
+		echo "→ Backup local guardado: worker/.env.bak.*"; \
+	fi
+	@gcloud storage cp $(SYNC_ENV_REMOTE) worker/.env
+	@echo "→ worker/.env actualizado desde $(SYNC_ENV_REMOTE)"
+
+sync-status: ## Compara la fecha del worker/.env local contra el del bucket
+	@echo "Local:"
+	@[ -f worker/.env ] && stat -c '  worker/.env  %y' worker/.env || echo "  worker/.env no existe"
+	@echo "Bucket:"
+	@gcloud storage ls -L $(SYNC_ENV_REMOTE) 2>/dev/null | grep -E "Creation Time|Update Time" | sed 's/^/  /' || echo "  Sin archivo en el bucket todavía (corre: make sync-up)"
