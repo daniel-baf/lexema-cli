@@ -5,9 +5,11 @@ import {
   describeError,
   fetchModels,
   buildConversationPrompt,
+  isAbortError,
   ChatTurn,
 } from '../api';
 import { loadConfig, saveConfig } from '../config';
+import { parseSlashCommand, validateModel } from '../commands';
 import Header from './Header';
 import { MessageRow, Entry } from './MessageList';
 import InputBox from './InputBox';
@@ -31,6 +33,8 @@ export default function App() {
   const sentRef = useRef<string[]>([]);
   const histIdxRef = useRef(-1);
   const draftRef = useRef('');
+  const activeRequestRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(true);
 
   const [entries, setEntries] = useState<Entry[]>([]);
   const [clearGen, setClearGen] = useState(0);
@@ -46,12 +50,15 @@ export default function App() {
 
   const sendMessage = useCallback(
     async (text: string) => {
+      const controller = new AbortController();
+      activeRequestRef.current = controller;
       setBusy(true);
       setNotice(null);
       pushEntry({ role: 'user', content: text });
       try {
         const prompt = buildConversationPrompt(historyRef.current, text);
-        const reply = await callWorker(prompt);
+        const reply = await callWorker(prompt, undefined, controller.signal);
+        if (!mountedRef.current) return;
         historyRef.current = [
           ...historyRef.current,
           { role: 'user', content: text },
@@ -59,9 +66,14 @@ export default function App() {
         ];
         pushEntry({ role: 'assistant', content: reply });
       } catch (error) {
+        if (!mountedRef.current) return;
+        // Abort explícito (Esc): el usuario ya se está yendo, no hace falta
+        // mostrarle un error por algo que él mismo canceló.
+        if (isAbortError(error)) return;
         pushEntry({ role: 'error', content: describeError(error) });
       } finally {
-        setBusy(false);
+        if (activeRequestRef.current === controller) activeRequestRef.current = null;
+        if (mountedRef.current) setBusy(false);
       }
     },
     [pushEntry]
@@ -69,9 +81,7 @@ export default function App() {
 
   const runCommand = useCallback(
     async (raw: string) => {
-      const spaceIdx = raw.search(/\s/);
-      const cmd = spaceIdx === -1 ? raw : raw.slice(0, spaceIdx);
-      const arg = spaceIdx === -1 ? '' : raw.slice(spaceIdx).trim();
+      const { cmd, arg } = parseSlashCommand(raw);
 
       if (cmd === '/exit' || cmd === '/quit') {
         exit();
@@ -107,6 +117,18 @@ export default function App() {
           }
           return;
         }
+        setBusy(true);
+        try {
+          const info = await fetchModels();
+          if (!validateModel(arg, info.models)) {
+            setNotice(`Modelo no permitido: ${arg}. Permitidos: ${(info.models || []).join(', ')}`);
+            return;
+          }
+        } catch (error) {
+          setNotice(`No se pudo validar el modelo (${describeError(error)}). Se guardó igual.`);
+        } finally {
+          setBusy(false);
+        }
         const config = loadConfig();
         config.model = arg;
         saveConfig(config);
@@ -137,6 +159,14 @@ export default function App() {
     };
   }, [internal_eventEmitter]);
 
+  // Marca el componente como desmontado para no setear estado desde una
+  // promesa (callWorker) que resuelve después de salir de la app.
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   useInput((data, key) => {
     if (key.return || data === '\n') {
       const text = input.trim();
@@ -152,6 +182,11 @@ export default function App() {
     }
 
     if (key.escape) {
+      // Cancela de verdad el request HTTP en curso (si lo hay) en vez de
+      // dejarlo colgado hasta su timeout de 30s.
+      if (busy && activeRequestRef.current) {
+        activeRequestRef.current.abort();
+      }
       exit();
       return;
     }

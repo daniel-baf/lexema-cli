@@ -19,7 +19,11 @@ export interface ChatTurn {
 
 const MAX_CONVERSATION_CHARS = 3500;
 
-export async function callWorker(prompt: string, model?: string): Promise<string> {
+export async function callWorker(
+  prompt: string,
+  model?: string,
+  signal?: AbortSignal
+): Promise<string> {
   const config = loadConfig();
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (config.token) headers.Authorization = `Bearer ${config.token}`;
@@ -27,10 +31,11 @@ export async function callWorker(prompt: string, model?: string): Promise<string
   const res = await axios.post<WorkerResponse>(
     config.workerUrl,
     { prompt, model: model || config.model },
-    { headers, timeout: 30000 }
+    { headers, timeout: 30000, signal }
   );
 
-  if (!res.data.reply) {
+  // '' es una respuesta vacía legítima del modelo; solo ausencia real es error.
+  if (res.data.reply === undefined || res.data.reply === null) {
     throw new Error(res.data.error || 'Respuesta vacía del servidor.');
   }
   return res.data.reply;
@@ -45,6 +50,14 @@ export async function fetchModels(): Promise<ModelsInfo> {
     timeout: 10000,
   });
   return res.data as ModelsInfo;
+}
+
+// Al abortar un request en curso (ej. el usuario apreta Esc), axios rechaza
+// con un error identificable (axios.isCancel / code ERR_CANCELED). No es un
+// fallo real: quien llama no debe mostrarlo como error al usuario.
+export function isAbortError(error: unknown): boolean {
+  if (axios.isCancel(error)) return true;
+  return axios.isAxiosError(error) && error.code === 'ERR_CANCELED';
 }
 
 export function describeError(error: unknown): string {

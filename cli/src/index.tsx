@@ -13,6 +13,7 @@ import {
   buildConversationPrompt,
   ChatTurn,
 } from './api';
+import { parseSlashCommand } from './commands';
 import type { ChildProcess } from 'node:child_process';
 import {
   downloadUpdateFile,
@@ -208,12 +209,13 @@ async function runSimpleChat() {
   for await (const raw of rl) {
     const text = raw.trim();
     const lower = text.toLowerCase();
-    if (lower === 'exit' || text === '/exit') break;
+    const { cmd } = parseSlashCommand(text);
+    if (lower === 'exit' || cmd === '/exit') break;
     if (!text) {
       safePrompt();
       continue;
     }
-    if (text === '/clear') {
+    if (cmd === '/clear') {
       // Limpia la pantalla real, no solo el historial en memoria, para que
       // "/clear" se sienta como un clear de verdad.
       process.stdout.write('\x1b[2J\x1b[3J\x1b[H');
@@ -223,7 +225,7 @@ async function runSimpleChat() {
       safePrompt();
       continue;
     }
-    if (text === '/help') {
+    if (cmd === '/help') {
       console.log(pc.dim('Comandos: /clear · /help · /exit'));
       safePrompt();
       continue;
