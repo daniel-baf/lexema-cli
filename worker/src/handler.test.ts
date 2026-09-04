@@ -290,6 +290,21 @@ describe('GET /install', () => {
     expect(script).not.toContain('Authorization');
   });
 
+  it('descarga el binario mostrando progreso (sin -s en curl, con --show-progress en wget)', async () => {
+    const res = await handleRequest(
+      new Request('http://mi-vm:8787/install'),
+      baseConfig(),
+      undefined,
+      undefined,
+      binarySource
+    );
+    const script = await res.text();
+    expect(script).toContain('curl -fSL -o "$2" "$1"');
+    expect(script).not.toContain('-fsSL -o "$2" "$1"');
+    expect(script).toContain('wget --show-progress -O "$2" "$1"');
+    expect(script).not.toContain('wget -q');
+  });
+
   it('embebe el checksum SHA-256 del binario y verifica antes de instalar', async () => {
     const res = await handleRequest(
       new Request('http://mi-vm:8787/install'),

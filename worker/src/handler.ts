@@ -118,9 +118,9 @@ esac
 
 fetch() { # $1=url $2=destino
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL ${authCurl}-o "$2" "$1"
+    curl -fSL ${authCurl}-o "$2" "$1"
   elif command -v wget >/dev/null 2>&1; then
-    wget -q ${authWget}-O "$2" "$1"
+    wget --show-progress ${authWget}-O "$2" "$1"
   else
     echo "Se necesita curl o wget para instalar." >&2
     exit 1
