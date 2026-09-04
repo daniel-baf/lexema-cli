@@ -251,6 +251,13 @@ Qué hace cada pieza:
 | `GET /install` (alias `/install.sh`) | Script sh generado al vuelo: detecta `uname` (linux-x64 / linux-arm64), baja el binario y lo deja en `/usr/local/bin/lexema` (con `sudo` si hace falta) |
 | `GET /install.ps1` | Script PowerShell: baja `lexema.exe` a `%LOCALAPPDATA%\Programs\lexema` y lo agrega al PATH de usuario |
 | `GET /install/binary?os=` | El binario en crudo (`linux-x64`, `linux-arm64`, `windows-x64`) |
+| `GET /uninstall` (alias `/uninstall.sh`) / `GET /uninstall.ps1` | Desinstala el binario (`/usr/local/bin/lexema` o el `.exe` de Windows); no toca `~/.lexema` |
+
+Cada binario descargado se verifica con su checksum SHA-256 antes de instalarse
+(el script aborta sin instalar nada si no coincide). Para desinstalar sin
+clonar el repo: `curl -fsSL http://<ip-servidor>:8787/uninstall | sh` (o
+`irm http://<ip-servidor>:8787/uninstall.ps1 | iex` en Windows) — también
+podés usar `lexema uninstall` si ya tenés la CLI instalada.
 
 Detalles:
 
@@ -282,6 +289,7 @@ lexema chat
 | `lexema config set-url <url>` | Cambiar la URL del servidor |
 | `lexema config set-token <token>` | Guardar el token de autenticación |
 | `lexema config set-model <modelo>` | Fijar un modelo por defecto |
+| `lexema uninstall` | Desinstala el binario (pide confirmación; `-y` la salta, `--purge` borra también `~/.lexema`) |
 
 La configuración se guarda en `~/.lexema/config.json`.
 
